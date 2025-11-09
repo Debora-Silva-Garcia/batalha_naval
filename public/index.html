@@ -2,37 +2,35 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Batalha Naval - Cliente</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #002b45;
-      color: white;
-      text-align: center;
-      margin-top: 40px;
-    }
-    #info {
-      margin-top: 20px;
-      font-size: 18px;
-    }
-    #status {
-      margin-top: 30px;
-      font-size: 20px;
-      font-weight: bold;
-      color: #00ffcc;
-    }
-  </style>
+  <title>Batalha Naval Multiplayer</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <h1>🎯 Batalha Naval Multiplayer</h1>
-  <p>Abra duas abas para simular 2 jogadores.</p>
+  <h1>⚓ Batalha Naval Multiplayer</h1>
 
   <div id="info">
     <p><strong>Seu ID:</strong> <span id="playerId">...</span></p>
     <p><strong>Sala:</strong> <span id="roomId">...</span></p>
   </div>
 
-  <div id="status">Aguardando conexão...</div>
+  <div id="status">Conectando ao servidor...</div>
+
+  <div id="boards">
+    <div class="board-container">
+      <h2>Seu Tabuleiro</h2>
+      <div id="playerBoard" class="board"></div>
+    </div>
+
+    <div class="board-container">
+      <h2>Tabuleiro do Oponente</h2>
+      <div id="enemyBoard" class="board"></div>
+    </div>
+  </div>
+
+  <div id="instructions">
+    <p>🛳️ Clique no seu tabuleiro para posicionar as embarcações.<br>
+    🎯 Depois clique no tabuleiro inimigo para atacar!</p>
+  </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="script.js"></script>
