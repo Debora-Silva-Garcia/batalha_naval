@@ -16,17 +16,20 @@ let enemyHits = [];
 let isPlacingShips = true;
 let placedShips = 0;
 let selectedShipSize = null;
+let selectedShipButton = null;
 let orientation = "horizontal";
-const TOTAL_SHIPS = 3; // 3 tipos: 5, 4 e 3
+const TOTAL_SHIPS = 3; // 3 embarcações: 5, 4 e 3
 
 // ===== Seleção de embarcações =====
 document.querySelectorAll(".shipBtn").forEach((btn) => {
   btn.addEventListener("click", () => {
     selectedShipSize = parseInt(btn.dataset.size);
+    selectedShipButton = btn;
     statusElem.textContent = `Selecionado navio de tamanho ${selectedShipSize}`;
   });
 });
 
+// Botão de rotação
 document.getElementById("rotateBtn").addEventListener("click", () => {
   orientation = orientation === "horizontal" ? "vertical" : "horizontal";
   orientationInfo.textContent = `Orientação: ${orientation}`;
@@ -67,21 +70,36 @@ function placeShip(x, y, cell) {
 
     if (targetX >= BOARD_SIZE || targetY >= BOARD_SIZE)
       return alert("Fora dos limites!");
+
     const targetCell = playerBoard.querySelector(
       `.cell[data-x="${targetX}"][data-y="${targetY}"]`
     );
+
     if (targetCell.classList.contains("ship"))
       return alert("Sobreposição detectada!");
+
     shipCells.push(targetCell);
   }
 
+  // Marca visualmente o navio
   shipCells.forEach((c) => c.classList.add("ship"));
+
+  // Registra no estado local
   playerShips.push({ x, y, size: selectedShipSize, orientation });
   placedShips++;
+
+  // Remove o botão correspondente à embarcação colocada
+  if (selectedShipButton) {
+    selectedShipButton.disabled = true;
+    selectedShipButton.style.opacity = "0.5";
+    selectedShipButton.textContent += " ✅";
+    selectedShipButton = null;
+  }
 
   selectedShipSize = null;
   statusElem.textContent = "Navio posicionado!";
 
+  // Se todas as embarcações foram colocadas
   if (placedShips >= TOTAL_SHIPS) {
     isPlacingShips = false;
     statusElem.textContent = "✅ Todos os navios posicionados! Aguardando adversário...";
