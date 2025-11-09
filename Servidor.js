@@ -9,7 +9,7 @@ app.use(cors());
 
 const server = http.createServer(app);
 const rooms = {}; // Armazena as salas e seus jogadores
-const io = new Server(server);
+// const io = new Server(server);
 
 // Servir arquivos estáticos da pasta "public" (cliente)
 app.use(express.static("public"));
