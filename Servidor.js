@@ -1,66 +1,78 @@
-// Importa módulos necessários
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
-const cors = require("cors");
-// Cria app e servidor
+
 const app = express();
-app.use(cors());
-
 const server = http.createServer(app);
-const rooms = {}; // Armazena as salas e seus jogadores
-// const io = new Server(server);
+const io = new Server(server);
 
-// Servir arquivos estáticos da pasta "public" (cliente)
 app.use(express.static("public"));
 
-io = new Server(server, {
-  cors: {
-    origin: ["https://seu-client.vercel.app", "https://seu-servico.onrender.com"],
-    methods: ["GET", "POST"]
-  }
-});
+const PORT = process.env.PORT || 3000;
 
-// Quando um cliente se conecta
+// Estrutura de armazenamento das salas
+const rooms = {};
+
 io.on("connection", (socket) => {
-  console.log("Novo jogador conectado!");
-  console.log("conectado:", socket.id);
-  socket.on("joinGame", () => { 
-    let roomJoined = null;
+  console.log("Novo jogador conectado:", socket.id);
+
+  let roomJoined = null;
+
+  // Tenta encontrar sala com menos de 2 jogadores
+  for (const roomId in rooms) {
+    const room = rooms[roomId];
+    if (room.players.length < 2) {
+      room.players.push(socket.id);
+      roomJoined = roomId;
+      break;
+    }
+  }
+
+  // Se não achou, cria nova sala
+  if (!roomJoined) {
+    const newRoomId = `room-${socket.id}`;
+    rooms[newRoomId] = {
+      players: [socket.id],
+      gameStarted: false,
+    };
+    roomJoined = newRoomId;
+  }
+
+  // Adiciona o jogador à sala
+  socket.join(roomJoined);
+  console.log(`Jogador ${socket.id} entrou na sala ${roomJoined}`);
+  socket.emit("joinedRoom", roomJoined);
+
+  // Verifica se sala está completa
+  const room = rooms[roomJoined];
+  if (room.players.length === 2) {
+    room.gameStarted = true;
+    io.to(roomJoined).emit("startGame", { roomId: roomJoined });
+    console.log(`Jogo iniciado na sala ${roomJoined}`);
+  }
+
+  // Quando um jogador desconecta
+  socket.on("disconnect", () => {
+    console.log("Jogador desconectado:", socket.id);
 
     for (const roomId in rooms) {
       const room = rooms[roomId];
-      if (room.players.length < 2) {
-        room.players.push(socket.id);
-        roomJoined = roomId;
+      const index = room.players.indexOf(socket.id);
+
+      if (index !== -1) {
+        // Remove o jogador da sala
+        room.players.splice(index, 1);
+        io.to(roomId).emit("playerLeft", socket.id);
+
+        // Remove a sala inteira (para evitar lixo e pareamento incorreto)
+        delete rooms[roomId];
+        console.log(`Sala ${roomId} removida devido à desconexão.`);
         break;
       }
     }
-
-    if (!roomJoined) {
-      const newRoomId = `room-${socket.id}`;
-      rooms[newRoomId] = { players: [socket.id], gameStarted: false };
-      roomJoined = newRoomId;
-    }
-
-    socket.join(roomJoined);
-    socket.emit("joinedRoom", roomJoined);
-
-    const room = rooms[roomJoined];
-    if (room.players.length === 2) {
-      room.gameStarted = true;
-      io.to(roomJoined).emit("startGame", { roomId: roomJoined });
-    }
-
-  });
-  socket.on("placeShips", (ships) => { /* salvar posições */ });
-  socket.on("fire", (target) => { /* processar ataque */ });
-
-  socket.on("disconnect", () => {
-    console.log("Jogador desconectado.");
   });
 });
 
-// Inicia servidor na porta 3000
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("Servidor rodando na porta", PORT));
+server.listen(PORT, () => {
+  console.log(`Servidor rodando em http://localhost:${PORT}`);
+});
