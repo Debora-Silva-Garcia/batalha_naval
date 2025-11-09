@@ -1,10 +1,12 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
+
 <head>
   <meta charset="UTF-8">
   <title>Batalha Naval Multiplayer</title>
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
   <h1>⚓ Batalha Naval Multiplayer</h1>
 
@@ -42,10 +44,19 @@
 
   <div id="instructions">
     <p>🛳️ Escolha uma embarcação e clique no seu tabuleiro para posicioná-la.<br>
-    🎯 Depois clique no tabuleiro inimigo para atacar!</p>
+      🎯 Depois clique no tabuleiro inimigo para atacar!</p>
+  </div>
+
+  <!-- Opções após o fim do jogo -->
+  <div id="postGameOptions" style="display: none;">
+    <h3>⚓ Partida encerrada</h3>
+    <p>Deseja jogar novamente?</p>
+    <button id="btnRematch" class="btn">🔁 Revanche</button>
+    <button id="btnNewMatch" class="btn">🎲 Nova Partida</button>
   </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="script.js"></script>
 </body>
+
 </html>

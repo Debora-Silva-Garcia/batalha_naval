@@ -1,4 +1,3 @@
-// Conecta ao servidor
 const socket = io();
 
 // Elementos
@@ -9,7 +8,11 @@ const playerBoard = document.getElementById("playerBoard");
 const enemyBoard = document.getElementById("enemyBoard");
 const orientationInfo = document.getElementById("orientationInfo");
 
-// Estado local
+// Pós-jogo
+const postGame = document.getElementById("postGameOptions");
+const btnRematch = document.getElementById("btnRematch");
+const btnNewMatch = document.getElementById("btnNewMatch");
+
 const BOARD_SIZE = 10;
 let playerShips = [];
 let isPlacingShips = true;
@@ -17,10 +20,10 @@ let placedShips = 0;
 let selectedShipSize = null;
 let selectedShipButton = null;
 let orientation = "horizontal";
-let isMyTurn = false; // controle local de turno
+let isMyTurn = false;
 const TOTAL_SHIPS = 3;
 
-// Seleção de embarcações
+// === Seleção de embarcações ===
 document.querySelectorAll(".shipBtn").forEach((btn) => {
   btn.addEventListener("click", () => {
     selectedShipSize = parseInt(btn.dataset.size);
@@ -28,13 +31,15 @@ document.querySelectorAll(".shipBtn").forEach((btn) => {
     statusElem.textContent = `Selecionado navio de tamanho ${selectedShipSize}`;
   });
 });
+
 document.getElementById("rotateBtn").addEventListener("click", () => {
   orientation = orientation === "horizontal" ? "vertical" : "horizontal";
   orientationInfo.textContent = `Orientação: ${orientation}`;
 });
 
-// Criação de tabuleiros
+// === Criação de tabuleiros ===
 function createBoard(boardElement, isPlayerBoard) {
+  boardElement.innerHTML = "";
   for (let y = 0; y < BOARD_SIZE; y++) {
     for (let x = 0; x < BOARD_SIZE; x++) {
       const cell = document.createElement("div");
@@ -55,7 +60,23 @@ function createBoard(boardElement, isPlayerBoard) {
 createBoard(playerBoard, true);
 createBoard(enemyBoard, false);
 
-// Posicionamento
+function resetBoards() {
+  playerShips = [];
+  placedShips = 0;
+  isPlacingShips = true;
+  selectedShipSize = null;
+  selectedShipButton = null;
+  document.querySelectorAll(".shipBtn").forEach((b) => {
+    b.disabled = false;
+    b.style.opacity = "1";
+    b.textContent = `${b.textContent.split(" ")[0]} (${b.dataset.size})`;
+  });
+  createBoard(playerBoard, true);
+  createBoard(enemyBoard, false);
+  postGame.style.display = "none";
+}
+
+// === Posicionamento ===
 function placeShip(x, y) {
   if (!isPlacingShips) return;
   if (!selectedShipSize) return alert("Escolha uma embarcação primeiro!");
@@ -93,23 +114,21 @@ function placeShip(x, y) {
   }
 }
 
-// Ataque
+// === Ataque ===
 function attackEnemy(x, y, cell) {
   if (isPlacingShips) return alert("Posicione todos os navios primeiro!");
   if (!isMyTurn) return alert("⏳ Aguarde seu turno!");
   if (cell.classList.contains("hit") || cell.classList.contains("miss")) return;
 
-  // envia e imediatamente bloqueia localmente (para evitar cliques duplos)
   socket.emit("attack", { x, y });
   isMyTurn = false;
   statusElem.textContent = `Você atacou [${x}, ${y}]`;
 }
 
-// Eventos do servidor
+// === Eventos ===
 socket.on("connect", () => {
   playerIdElem.textContent = socket.id;
   statusElem.textContent = "Conectado! Aguardando pareamento...";
-  socket.emit("joinGame");
 });
 
 socket.on("joinedRoom", (roomId) => {
@@ -117,77 +136,54 @@ socket.on("joinedRoom", (roomId) => {
   statusElem.textContent = "Esperando outro jogador...";
 });
 
-// startGame mantém compatibilidade
 socket.on("startGame", () => {
   statusElem.textContent = "✅ Jogo iniciado! Posicione seus navios.";
 });
 
-// readyToPlay compatibilidade
 socket.on("readyToPlay", () => {
   statusElem.textContent = "🎯 Ambos prontos! Prepare-se para jogar.";
 });
 
-// Fonte autoritativa do turno: TODOS devem reagir a isso
-socket.on("turnUpdate", (data) => {
-  const { turn } = data;
+socket.on("turnUpdate", ({ turn }) => {
   isMyTurn = turn === socket.id;
-  if (isMyTurn) {
-    statusElem.textContent = "🟢 Seu turno! Escolha uma célula no tabuleiro inimigo.";
-    // opcional: destacar visualmente o tabuleiro inimigo
-    enemyBoard.classList.add("active-turn");
-  } else {
-    statusElem.textContent = "🔴 Turno do adversário...";
-    enemyBoard.classList.remove("active-turn");
-  }
+  statusElem.textContent = isMyTurn
+    ? "🟢 Seu turno!"
+    : "🔴 Turno do adversário...";
 });
 
-// Mensagens de compatibilidade (podem ser ignoradas, mas mantidas)
-socket.on("yourTurn", () => {
-  isMyTurn = true;
-  statusElem.textContent = "🟢 Seu turno! Escolha uma célula no tabuleiro inimigo.";
-  enemyBoard.classList.add("active-turn");
-});
-socket.on("notYourTurn", () => {
-  isMyTurn = false;
-  statusElem.textContent = "🔴 Turno do adversário...";
-  enemyBoard.classList.remove("active-turn");
-});
-
-// Feedback visual de ataques
-socket.on("attackResult", (data) => {
-  const { attacker, x, y, result } = data;
+// === Feedback visual ===
+socket.on("attackResult", ({ attacker, x, y, result }) => {
   const isMyAttack = attacker === socket.id;
-
   const board = isMyAttack ? enemyBoard : playerBoard;
   const cell = board.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
   if (!cell) return;
-
-  if (result === "hit") {
-    cell.textContent = "❌";
-    cell.classList.add("hit");
-  } else {
-    cell.textContent = "●";
-    cell.classList.add("miss");
-  }
+  cell.textContent = result === "hit" ? "❌" : "●";
+  cell.classList.add(result === "hit" ? "hit" : "miss");
 });
 
-// Player saiu
-socket.on("playerLeft", (playerId) => {
-  statusElem.textContent = `⚠️ O jogador ${playerId} saiu. A sala será encerrada.`;
-  roomIdElem.textContent = "Sala desconectada";
-});
-
-// Mensagens simples do servidor
-socket.on("message", (msg) => {
-  // Pode substituir alert por um componente UI
-  console.log("Servidor:", msg);
-  // opcional: exibir brevemente no status
-  statusElem.textContent = msg;
-});
-
-// Fim de jogo
-socket.on("gameOver", (data) => {
+// === Pós-jogo ===
+socket.on("gameOverOptions", (data) => {
   const msg = data.winner === socket.id ? "🎉 Você venceu!" : "💥 Você foi derrotado!";
-  alert(msg);
   statusElem.textContent = msg;
+  postGame.style.display = "block";
 });
+
+btnRematch.addEventListener("click", () => {
+  postGame.style.display = "none";
+  socket.emit("rematchRequest");
+  statusElem.textContent = "🔁 Solicitando revanche...";
+});
+
+btnNewMatch.addEventListener("click", () => {
+  postGame.style.display = "none";
+  socket.emit("newMatchRequest");
+  statusElem.textContent = "🎲 Procurando nova partida...";
+});
+
+socket.on("rematchStart", () => {
+  resetBoards();
+  statusElem.textContent = "🔄 Revanche iniciada! Posicione seus navios.";
+});
+
+socket.on("message", (msg) => (statusElem.textContent = msg));
+socket.on("playerLeft", (id) => (statusElem.textContent = `⚠️ Jogador ${id} saiu.`));

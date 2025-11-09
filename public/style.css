@@ -109,16 +109,19 @@ body {
 }
 
 .cell.ship {
-  background-color: #00ffcc; /* embarcação posicionada */
+  background-color: #00ffcc;
+  /* embarcação posicionada */
 }
 
 .cell.hit {
-  background-color: #ff4444; /* tiro certeiro */
+  background-color: #ff4444;
+  /* tiro certeiro */
   color: white;
 }
 
 .cell.miss {
-  background-color: #222; /* tiro errado */
+  background-color: #222;
+  /* tiro errado */
   color: white;
 }
 
@@ -127,4 +130,37 @@ body {
   font-weight: bold;
   font-size: 18px;
   color: #00ffcc;
+}
+
+/* ===== Pós-jogo ===== */
+#postGameOptions {
+  background: #0a2b3a;
+  color: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  width: fit-content;
+  margin: 25px auto;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
+  text-align: center;
+}
+
+#postGameOptions h3 {
+  margin: 0 0 10px 0;
+  color: #00ffcc;
+}
+
+#postGameOptions .btn {
+  background: #0099cc;
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  margin: 10px;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#postGameOptions .btn:hover {
+  background: #00bbee;
 }
