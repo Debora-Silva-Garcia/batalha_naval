@@ -30,11 +30,11 @@ io.on("connection", (socket) => {
     const newRoomId = `room-${socket.id}`;
     rooms[newRoomId] = {
       players: [socket.id],
-      ships: {},     // ships[playerId] = [ {x,y,size,orientation}, ... ]
-      hits: {},      // hits[playerId] = [ {x,y,result} ] where key is attackerId
+      ships: {},         // ships[playerId] = [ { x, y, size, orientation }, ... ]
+      hitsAgainst: {},   // hitsAgainst[targetId] = [ { x, y, result, by } ]
       turn: null,
       gameStarted: false,
-      lock: false    // simples lock para evitar race conditions
+      lock: false
     };
     roomJoined = newRoomId;
   }
@@ -45,12 +45,11 @@ io.on("connection", (socket) => {
 
   const room = rooms[roomJoined];
 
-  // Se a sala estiver completa, iniciar jogo e enviar atualização de turno autoritativa
+  // Se a sala estiver completa, iniciar jogo e emitir turno autoritativo
   if (room.players.length === 2) {
     room.gameStarted = true;
     room.turn = room.players[0];
     io.to(roomJoined).emit("startGame", { roomId: roomJoined });
-    // fonte de verdade do turno
     io.to(roomJoined).emit("turnUpdate", { turn: room.turn });
     console.log(`Jogo iniciado na sala ${roomJoined} - turno: ${room.turn}`);
   }
@@ -60,13 +59,19 @@ io.on("connection", (socket) => {
     const roomId = getRoomByPlayer(socket.id);
     if (!roomId) return;
     const r = rooms[roomId];
+
     r.ships[socket.id] = ships;
-    r.hits[socket.id] = []; // inicializa hits do atacante
+    // garante que exista a estrutura hitsAgainst para esse alvo
+    if (!Array.isArray(r.hitsAgainst[socket.id])) r.hitsAgainst[socket.id] = [];
+
     console.log(`Navios de ${socket.id} registrados em ${roomId}`);
 
+    // Quando ambos tiverem enviado seus navios, inicializa hitsAgainst para ambos e notifica
     if (Object.keys(r.ships).length === 2) {
+      for (const pid of r.players) {
+        if (!Array.isArray(r.hitsAgainst[pid])) r.hitsAgainst[pid] = [];
+      }
       io.to(roomId).emit("readyToPlay");
-      // garante que todos saibam quem é o jogador do turno
       io.to(roomId).emit("turnUpdate", { turn: r.turn });
       io.to(r.turn).emit("yourTurn"); // compatibilidade
     }
@@ -78,7 +83,10 @@ io.on("connection", (socket) => {
     if (!roomId) return;
     const r = rooms[roomId];
 
-    if (!r || !r.gameStarted) return;
+    if (!r || !r.gameStarted) {
+      socket.emit("message", "Partida não iniciada.");
+      return;
+    }
 
     // lock simples para evitar processar >1 ataque simultâneo
     if (r.lock) {
@@ -101,21 +109,19 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // assegura que há um array de ataques para este atacante
-    if (!Array.isArray(r.hits[socket.id])) r.hits[socket.id] = [];
+    // garante array de ataques contra oponente
+    if (!Array.isArray(r.hitsAgainst[opponentId])) r.hitsAgainst[opponentId] = [];
 
-    // previne ataques duplicados: só considera ataques já feitos POR ESTE MESMO atacante
-    const alreadyAttackedByMe = r.hits[socket.id].some(h => h.x === x && h.y === y);
+    // previne que este mesmo jogador ataque a mesma célula no tabuleiro do oponente
+    const alreadyAttackedByMe = r.hitsAgainst[opponentId].some(h => h.x === x && h.y === y && h.by === socket.id);
     if (alreadyAttackedByMe) {
-      socket.emit("message", "Você já atacou esse quadrado. Escolha outro.");
+      socket.emit("message", "Você já atacou esse quadrado no tabuleiro do adversário. Escolha outro.");
       r.lock = false;
       return;
     }
 
-
+    // verifica acerto
     let hit = false;
-
-    // Verifica acerto
     for (const ship of r.ships[opponentId]) {
       const { size, orientation, x: sx, y: sy } = ship;
       for (let i = 0; i < size; i++) {
@@ -129,11 +135,10 @@ io.on("connection", (socket) => {
       if (hit) break;
     }
 
-    // Registra hit/miss sob o atacante
-    if (!Array.isArray(r.hits[socket.id])) r.hits[socket.id] = [];
-    r.hits[socket.id].push({ x, y, result: hit ? "hit" : "miss" });
+    // registra o ataque como contra o opponentId (com informação de quem atacou)
+    r.hitsAgainst[opponentId].push({ x, y, result: hit ? "hit" : "miss", by: socket.id });
 
-    // Envia resultado para ambos
+    // envia resultado para ambos
     io.to(roomId).emit("attackResult", {
       attacker: socket.id,
       x,
@@ -141,13 +146,13 @@ io.on("connection", (socket) => {
       result: hit ? "hit" : "miss",
     });
 
-    // --- HERE: trocar SEMPRE o turno (uma jogada por turno) ---
+    // troca SEMPRE o turno (uma jogada por turno)
     r.turn = opponentId;
 
-    // envia atualização autoritativa do turno para todos (fonte de verdade)
+    // envia atualização autoritativa do turno para todos
     io.to(roomId).emit("turnUpdate", { turn: r.turn });
 
-    // verifica condição de vitória (todas as células do oponente atingidas)
+    // verifica condição de vitória de forma robusta (contagem de coordenadas únicas)
     const opponentCells = r.ships[opponentId].flatMap((ship) => {
       const cells = [];
       for (let i = 0; i < ship.size; i++) {
@@ -159,11 +164,17 @@ io.on("connection", (socket) => {
       return cells;
     });
 
-    const hitsAgainstOpponent = Object.values(r.hits)
-      .flat()
-      .filter((h) => h.result === "hit" && opponentCells.some((c) => c.x === h.x && c.y === h.y));
+    // cria um Set de coordenadas "x,y" únicas que foram registradas como hit contra o opponentId
+    const hitsSet = new Set();
+    for (const h of r.hitsAgainst[opponentId]) {
+      if (h.result !== "hit") continue;
+      // só conta se essa coordenada realmente pertence ao conjunto de células do oponente
+      if (opponentCells.some(c => c.x === h.x && c.y === h.y)) {
+        hitsSet.add(`${h.x},${h.y}`);
+      }
+    }
 
-    if (hitsAgainstOpponent.length >= opponentCells.length) {
+    if (hitsSet.size >= opponentCells.length) {
       io.to(roomId).emit("gameOver", { winner: socket.id });
       delete rooms[roomId];
       console.log(`Sala ${roomId} encerrada. Vencedor: ${socket.id}`);
@@ -171,7 +182,6 @@ io.on("connection", (socket) => {
 
     r.lock = false;
   });
-
 
   // DISCONNECT
   socket.on("disconnect", () => {
