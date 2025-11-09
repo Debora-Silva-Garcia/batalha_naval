@@ -9,7 +9,6 @@ const io = new Server(server);
 app.use(express.static("public"));
 
 const PORT = process.env.PORT || 3000;
-
 const rooms = {};
 
 io.on("connection", (socket) => {
@@ -17,7 +16,7 @@ io.on("connection", (socket) => {
 
   let roomJoined = null;
 
-  // Tenta encontrar sala com menos de 2 jogadores
+  // Encontrar ou criar sala
   for (const roomId in rooms) {
     const room = rooms[roomId];
     if (room.players.length < 2) {
@@ -27,84 +26,114 @@ io.on("connection", (socket) => {
     }
   }
 
-  // Se não achou, cria nova sala
   if (!roomJoined) {
     const newRoomId = `room-${socket.id}`;
     rooms[newRoomId] = {
       players: [socket.id],
-      ships: {},
-      hits: {},
+      ships: {},     // ships[playerId] = [ {x,y,size,orientation}, ... ]
+      hits: {},      // hits[playerId] = [ {x,y,result} ] where key is attackerId
       turn: null,
       gameStarted: false,
+      lock: false    // simples lock para evitar race conditions
     };
     roomJoined = newRoomId;
   }
 
-  // Adiciona jogador à sala
   socket.join(roomJoined);
   socket.emit("joinedRoom", roomJoined);
   console.log(`Jogador ${socket.id} entrou na sala ${roomJoined}`);
 
   const room = rooms[roomJoined];
 
+  // Se a sala estiver completa, iniciar jogo e enviar atualização de turno autoritativa
   if (room.players.length === 2) {
     room.gameStarted = true;
-    room.turn = room.players[0]; // primeiro jogador começa
+    room.turn = room.players[0];
     io.to(roomJoined).emit("startGame", { roomId: roomJoined });
-    console.log(`Jogo iniciado na sala ${roomJoined}`);
+    // fonte de verdade do turno
+    io.to(roomJoined).emit("turnUpdate", { turn: room.turn });
+    console.log(`Jogo iniciado na sala ${roomJoined} - turno: ${room.turn}`);
   }
 
-  // ===== Receber as posições dos navios =====
+  // RECEBER POSIÇÕES DOS NAVIOS
   socket.on("placeShips", (ships) => {
     const roomId = getRoomByPlayer(socket.id);
     if (!roomId) return;
+    const r = rooms[roomId];
+    r.ships[socket.id] = ships;
+    r.hits[socket.id] = []; // inicializa hits do atacante
+    console.log(`Navios de ${socket.id} registrados em ${roomId}`);
 
-    const room = rooms[roomId];
-    room.ships[socket.id] = ships;
-    room.hits[socket.id] = [];
-
-    console.log(`Navios do jogador ${socket.id} registrados na sala ${roomId}`);
-
-    // Se ambos enviaram as embarcações, começa o jogo
-    if (Object.keys(room.ships).length === 2) {
+    if (Object.keys(r.ships).length === 2) {
       io.to(roomId).emit("readyToPlay");
-      io.to(room.turn).emit("yourTurn");
+      // garante que todos saibam quem é o jogador do turno
+      io.to(roomId).emit("turnUpdate", { turn: r.turn });
+      io.to(r.turn).emit("yourTurn"); // compatibilidade
     }
   });
 
-  // ===== Receber um ataque =====
+  // RECEBER ATAQUE
   socket.on("attack", ({ x, y }) => {
     const roomId = getRoomByPlayer(socket.id);
     if (!roomId) return;
+    const r = rooms[roomId];
 
-    const room = rooms[roomId];
-    if (socket.id !== room.turn) return; // não é o turno desse jogador
+    if (!r || !r.gameStarted) return;
 
-    const opponentId = room.players.find((id) => id !== socket.id);
-    const opponentShips = room.ships[opponentId];
+    // lock simples para evitar processar >1 ataque simultâneo
+    if (r.lock) {
+      socket.emit("message", "Aguarde processamento...");
+      return;
+    }
+    r.lock = true;
+
+    // valida turno
+    if (socket.id !== r.turn) {
+      socket.emit("message", "⛔ Não é seu turno!");
+      r.lock = false;
+      return;
+    }
+
+    const opponentId = r.players.find((id) => id !== socket.id);
+    if (!opponentId || !r.ships[opponentId]) {
+      socket.emit("message", "Oponente não pronto ou ausente.");
+      r.lock = false;
+      return;
+    }
+
+    // assegura que há um array de ataques para este atacante
+    if (!Array.isArray(r.hits[socket.id])) r.hits[socket.id] = [];
+
+    // previne ataques duplicados: só considera ataques já feitos POR ESTE MESMO atacante
+    const alreadyAttackedByMe = r.hits[socket.id].some(h => h.x === x && h.y === y);
+    if (alreadyAttackedByMe) {
+      socket.emit("message", "Você já atacou esse quadrado. Escolha outro.");
+      r.lock = false;
+      return;
+    }
+
 
     let hit = false;
 
-    // Verifica se o tiro acertou alguma embarcação
-    for (const ship of opponentShips) {
+    // Verifica acerto
+    for (const ship of r.ships[opponentId]) {
       const { size, orientation, x: sx, y: sy } = ship;
       for (let i = 0; i < size; i++) {
         const posX = orientation === "horizontal" ? sx + i : sx;
         const posY = orientation === "vertical" ? sy + i : sy;
         if (posX === x && posY === y) {
           hit = true;
-          room.hits[socket.id].push({ x, y, result: "hit" });
           break;
         }
       }
       if (hit) break;
     }
 
-    if (!hit) {
-      room.hits[socket.id].push({ x, y, result: "miss" });
-    }
+    // Registra hit/miss sob o atacante
+    if (!Array.isArray(r.hits[socket.id])) r.hits[socket.id] = [];
+    r.hits[socket.id].push({ x, y, result: hit ? "hit" : "miss" });
 
-    // Envia resultado para ambos os jogadores
+    // Envia resultado para ambos
     io.to(roomId).emit("attackResult", {
       attacker: socket.id,
       x,
@@ -112,14 +141,14 @@ io.on("connection", (socket) => {
       result: hit ? "hit" : "miss",
     });
 
-    // Troca o turno apenas se errou
-    if (!hit) {
-      room.turn = opponentId;
-      io.to(room.turn).emit("yourTurn");
-    }
+    // --- HERE: trocar SEMPRE o turno (uma jogada por turno) ---
+    r.turn = opponentId;
 
-    // Verifica se o jogo terminou (todas as partes dos navios destruídas)
-    const opponentCells = opponentShips.flatMap((ship) => {
+    // envia atualização autoritativa do turno para todos (fonte de verdade)
+    io.to(roomId).emit("turnUpdate", { turn: r.turn });
+
+    // verifica condição de vitória (todas as células do oponente atingidas)
+    const opponentCells = r.ships[opponentId].flatMap((ship) => {
       const cells = [];
       for (let i = 0; i < ship.size; i++) {
         cells.push({
@@ -130,15 +159,21 @@ io.on("connection", (socket) => {
       return cells;
     });
 
-    const hitsByAttacker = room.hits[socket.id].filter((h) => h.result === "hit");
-    if (hitsByAttacker.length >= opponentCells.length) {
+    const hitsAgainstOpponent = Object.values(r.hits)
+      .flat()
+      .filter((h) => h.result === "hit" && opponentCells.some((c) => c.x === h.x && c.y === h.y));
+
+    if (hitsAgainstOpponent.length >= opponentCells.length) {
       io.to(roomId).emit("gameOver", { winner: socket.id });
       delete rooms[roomId];
       console.log(`Sala ${roomId} encerrada. Vencedor: ${socket.id}`);
     }
+
+    r.lock = false;
   });
 
-  // ===== Quando o jogador desconecta =====
+
+  // DISCONNECT
   socket.on("disconnect", () => {
     console.log("Jogador desconectado:", socket.id);
     for (const roomId in rooms) {
@@ -154,7 +189,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// ===== Função auxiliar =====
+// Auxiliar
 function getRoomByPlayer(playerId) {
   for (const roomId in rooms) {
     const room = rooms[roomId];
