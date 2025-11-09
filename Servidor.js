@@ -50,9 +50,10 @@ function assignToAvailableRoom(socket) {
 
   const room = rooms[roomJoined];
   if (room.players.length === 2) {
-    room.gameStarted = true;
+    // apenas prepara a sala (não iniciar o jogo até ambos colocarem navios)
     room.turn = room.players[0];
     io.to(roomJoined).emit("startGame", { roomId: roomJoined });
+    // informar quem terá o turno quando o jogo começar
     io.to(roomJoined).emit("turnUpdate", { turn: room.turn });
   }
 }
@@ -72,13 +73,26 @@ io.on("connection", (socket) => {
     r.ships[socket.id] = ships;
     if (!Array.isArray(r.hitsAgainst[socket.id])) r.hitsAgainst[socket.id] = [];
 
+    console.log(`Navios de ${socket.id} registrados em ${roomId}`);
+
+    // Quando ambos tiverem enviado seus navios:
     if (Object.keys(r.ships).length === 2) {
+      // inicializa hitsAgainst para ambos (defensivo)
       for (const pid of r.players) {
         if (!Array.isArray(r.hitsAgainst[pid])) r.hitsAgainst[pid] = [];
       }
+
+      // ------ CORREÇÃO IMPORTANTE ------
+      // Agora sim marcamos o jogo como iniciado — assim o servidor aceitará ataques.
+      r.gameStarted = true;
+      // garantir turno (começa pelo primeiro jogador da sala)
+      r.turn = r.turn || r.players[0];
+
+      // Notifica clientes
       io.to(roomId).emit("readyToPlay");
       io.to(roomId).emit("turnUpdate", { turn: r.turn });
-      io.to(r.turn).emit("yourTurn");
+      io.to(r.turn).emit("yourTurn"); // compatibilidade/UX
+      console.log(`Sala ${roomId} pronta para jogar. Turno: ${r.turn}`);
     }
   });
 
@@ -88,9 +102,15 @@ io.on("connection", (socket) => {
     if (!roomId) return;
     const r = rooms[roomId];
 
-    if (!r || !r.gameStarted) return;
+    if (!r || !r.gameStarted) {
+      socket.emit("message", "Partida não iniciada.");
+      return;
+    }
 
-    if (r.lock) return socket.emit("message", "Aguarde processamento...");
+    if (r.lock) {
+      socket.emit("message", "Aguarde processamento...");
+      return;
+    }
     r.lock = true;
 
     if (socket.id !== r.turn) {
@@ -135,11 +155,11 @@ io.on("connection", (socket) => {
 
     io.to(roomId).emit("attackResult", { attacker: socket.id, x, y, result: hit ? "hit" : "miss" });
 
-    // Troca o turno (1 jogada por vez)
+    // Troca o turno (uma jogada por vez)
     r.turn = opponentId;
     io.to(roomId).emit("turnUpdate", { turn: r.turn });
 
-    // ===== Verifica vitória =====
+    // Verifica vitória
     const opponentCells = r.ships[opponentId].flatMap((ship) => {
       const cells = [];
       for (let i = 0; i < ship.size; i++) {
@@ -160,8 +180,10 @@ io.on("connection", (socket) => {
     }
 
     if (hitsSet.size >= opponentCells.length) {
+      // em vez de deletar imediatamente, avisamos com opções e aguardamos decisão dos jogadores
       io.to(roomId).emit("gameOverOptions", { winner: socket.id });
-      console.log(`Sala ${roomId} encerrada. Vencedor: ${socket.id}`);
+      console.log(`Sala ${roomId}: vencedor ${socket.id}`);
+      // note: não deletamos room ainda — aguardamos rematch/newMatch
     }
 
     r.lock = false;
@@ -177,10 +199,11 @@ io.on("connection", (socket) => {
     room.rematchVotes.add(socket.id);
 
     if (room.rematchVotes.size === 2) {
+      // reinicia estado da sala para nova partida com os mesmos jogadores
       room.ships = {};
       room.hitsAgainst = {};
       room.turn = room.players[0];
-      room.gameStarted = false;
+      room.gameStarted = false; // volta a false até que ambos enviem placeShips
       room.lock = false;
       delete room.rematchVotes;
 
@@ -196,9 +219,18 @@ io.on("connection", (socket) => {
     if (!roomId) return;
     const room = rooms[roomId];
 
+    // sai da sala atual e entra no matchmaking normal
     socket.leave(roomId);
     room.players = room.players.filter((id) => id !== socket.id);
-    if (room.players.length === 0) delete rooms[roomId];
+    // se sobrar um jogador solo, informe e limpe a sala
+    if (room.players.length === 1) {
+      const remaining = room.players[0];
+      io.to(roomId).emit("playerLeft", socket.id);
+      // se desejar manter o jogador sozinho em sala para esperar, não delete. Aqui optamos por remover a sala.
+      delete rooms[roomId];
+    } else if (room.players.length === 0) {
+      delete rooms[roomId];
+    }
 
     assignToAvailableRoom(socket);
   });
