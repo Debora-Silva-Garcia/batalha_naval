@@ -98,6 +98,10 @@ body {
   border-radius: 3px;
   cursor: pointer;
   transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
 }
 
 .cell:hover {
@@ -110,10 +114,12 @@ body {
 
 .cell.hit {
   background-color: #ff4444; /* tiro certeiro */
+  color: white;
 }
 
 .cell.miss {
   background-color: #222; /* tiro errado */
+  color: white;
 }
 
 #status {

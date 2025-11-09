@@ -12,13 +12,12 @@ const orientationInfo = document.getElementById("orientationInfo");
 // Estado local
 const BOARD_SIZE = 10;
 let playerShips = [];
-let enemyHits = [];
 let isPlacingShips = true;
 let placedShips = 0;
 let selectedShipSize = null;
 let selectedShipButton = null;
 let orientation = "horizontal";
-const TOTAL_SHIPS = 3; // 3 embarcações: 5, 4 e 3
+const TOTAL_SHIPS = 3;
 
 // ===== Seleção de embarcações =====
 document.querySelectorAll(".shipBtn").forEach((btn) => {
@@ -29,7 +28,6 @@ document.querySelectorAll(".shipBtn").forEach((btn) => {
   });
 });
 
-// Botão de rotação
 document.getElementById("rotateBtn").addEventListener("click", () => {
   orientation = orientation === "horizontal" ? "vertical" : "horizontal";
   orientationInfo.textContent = `Orientação: ${orientation}`;
@@ -58,37 +56,27 @@ function createBoard(boardElement, isPlayerBoard) {
 createBoard(playerBoard, true);
 createBoard(enemyBoard, false);
 
-// ===== Lógica de posicionamento de navios =====
-function placeShip(x, y, cell) {
+// ===== Posicionamento de navios =====
+function placeShip(x, y) {
   if (!isPlacingShips) return;
   if (!selectedShipSize) return alert("Escolha uma embarcação primeiro!");
 
   const shipCells = [];
   for (let i = 0; i < selectedShipSize; i++) {
-    const targetX = orientation === "horizontal" ? x + i : x;
-    const targetY = orientation === "vertical" ? y + i : y;
-
-    if (targetX >= BOARD_SIZE || targetY >= BOARD_SIZE)
+    const tx = orientation === "horizontal" ? x + i : x;
+    const ty = orientation === "vertical" ? y + i : y;
+    if (tx >= BOARD_SIZE || ty >= BOARD_SIZE)
       return alert("Fora dos limites!");
-
-    const targetCell = playerBoard.querySelector(
-      `.cell[data-x="${targetX}"][data-y="${targetY}"]`
-    );
-
-    if (targetCell.classList.contains("ship"))
+    const cell = playerBoard.querySelector(`.cell[data-x="${tx}"][data-y="${ty}"]`);
+    if (cell.classList.contains("ship"))
       return alert("Sobreposição detectada!");
-
-    shipCells.push(targetCell);
+    shipCells.push(cell);
   }
 
-  // Marca visualmente o navio
   shipCells.forEach((c) => c.classList.add("ship"));
-
-  // Registra no estado local
   playerShips.push({ x, y, size: selectedShipSize, orientation });
   placedShips++;
 
-  // Remove o botão correspondente à embarcação colocada
   if (selectedShipButton) {
     selectedShipButton.disabled = true;
     selectedShipButton.style.opacity = "0.5";
@@ -99,7 +87,6 @@ function placeShip(x, y, cell) {
   selectedShipSize = null;
   statusElem.textContent = "Navio posicionado!";
 
-  // Se todas as embarcações foram colocadas
   if (placedShips >= TOTAL_SHIPS) {
     isPlacingShips = false;
     statusElem.textContent = "✅ Todos os navios posicionados! Aguardando adversário...";
@@ -111,7 +98,6 @@ function placeShip(x, y, cell) {
 function attackEnemy(x, y, cell) {
   if (isPlacingShips) return alert("Posicione todos os navios primeiro!");
   if (cell.classList.contains("hit") || cell.classList.contains("miss")) return;
-
   socket.emit("attack", { x, y });
   statusElem.textContent = `Você atacou [${x}, ${y}]`;
 }
@@ -128,8 +114,16 @@ socket.on("joinedRoom", (roomId) => {
   statusElem.textContent = "Esperando outro jogador...";
 });
 
-socket.on("startGame", (data) => {
+socket.on("startGame", () => {
   statusElem.textContent = "✅ Jogo iniciado! Posicione seus navios.";
+});
+
+socket.on("readyToPlay", () => {
+  statusElem.textContent = "🎯 Ambos prontos! Prepare-se para jogar.";
+});
+
+socket.on("yourTurn", () => {
+  statusElem.textContent = "🟢 Seu turno! Escolha uma célula no tabuleiro inimigo.";
 });
 
 socket.on("playerLeft", (playerId) => {
@@ -137,11 +131,30 @@ socket.on("playerLeft", (playerId) => {
   roomIdElem.textContent = "Sala desconectada";
 });
 
+// ===== Feedback visual de ataques =====
 socket.on("attackResult", (data) => {
-  const { x, y, result } = data;
-  const cells = enemyBoard.querySelectorAll(".cell");
-  const index = y * BOARD_SIZE + x;
-  const cell = cells[index];
-  if (result === "hit") cell.classList.add("hit");
-  else cell.classList.add("miss");
+  const { attacker, x, y, result } = data;
+  const isMyAttack = attacker === socket.id;
+
+  const board = isMyAttack ? enemyBoard : playerBoard;
+  const cell = board.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+  if (!cell) return;
+
+  if (result === "hit") {
+    cell.textContent = "❌";
+    cell.classList.add("hit");
+  } else {
+    cell.textContent = "●";
+    cell.classList.add("miss");
+  }
+});
+
+// ===== Fim de jogo =====
+socket.on("gameOver", (data) => {
+  const msg =
+    data.winner === socket.id
+      ? "🎉 Você venceu!"
+      : "💥 Você foi derrotado!";
+  alert(msg);
+  statusElem.textContent = msg;
 });
