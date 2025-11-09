@@ -16,6 +16,19 @@
   <div id="status">Conectando ao servidor...</div>
 
   <div id="boards">
+    <!-- Painel lateral com embarcações -->
+    <div id="shipPanel">
+      <h3>Embarcações</h3>
+      <div id="shipSelection">
+        <button class="shipBtn" data-size="5">🚢 Tamanho 5</button>
+        <button class="shipBtn" data-size="4">🚤 Tamanho 4</button>
+        <button class="shipBtn" data-size="3">⛵ Tamanho 3</button>
+      </div>
+      <button id="rotateBtn">↩️ Rotacionar</button>
+      <p id="orientationInfo">Orientação: horizontal</p>
+    </div>
+
+    <!-- Tabuleiros -->
     <div class="board-container">
       <h2>Seu Tabuleiro</h2>
       <div id="playerBoard" class="board"></div>
@@ -28,7 +41,7 @@
   </div>
 
   <div id="instructions">
-    <p>🛳️ Clique no seu tabuleiro para posicionar as embarcações.<br>
+    <p>🛳️ Escolha uma embarcação e clique no seu tabuleiro para posicioná-la.<br>
     🎯 Depois clique no tabuleiro inimigo para atacar!</p>
   </div>
 

@@ -7,16 +7,32 @@ const roomIdElem = document.getElementById("roomId");
 const statusElem = document.getElementById("status");
 const playerBoard = document.getElementById("playerBoard");
 const enemyBoard = document.getElementById("enemyBoard");
+const orientationInfo = document.getElementById("orientationInfo");
 
 // Estado local
 const BOARD_SIZE = 10;
 let playerShips = [];
 let enemyHits = [];
-let isPlacingShips = true; // fase inicial
+let isPlacingShips = true;
 let placedShips = 0;
-const TOTAL_SHIPS = 5; // pode ajustar o número de navios
+let selectedShipSize = null;
+let orientation = "horizontal";
+const TOTAL_SHIPS = 3; // 3 tipos: 5, 4 e 3
 
-// 🔹 Gera o tabuleiro dinamicamente
+// ===== Seleção de embarcações =====
+document.querySelectorAll(".shipBtn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    selectedShipSize = parseInt(btn.dataset.size);
+    statusElem.textContent = `Selecionado navio de tamanho ${selectedShipSize}`;
+  });
+});
+
+document.getElementById("rotateBtn").addEventListener("click", () => {
+  orientation = orientation === "horizontal" ? "vertical" : "horizontal";
+  orientationInfo.textContent = `Orientação: ${orientation}`;
+});
+
+// ===== Criação de tabuleiros =====
 function createBoard(boardElement, isPlayerBoard) {
   for (let y = 0; y < BOARD_SIZE; y++) {
     for (let x = 0; x < BOARD_SIZE; x++) {
@@ -25,7 +41,6 @@ function createBoard(boardElement, isPlayerBoard) {
       cell.dataset.x = x;
       cell.dataset.y = y;
 
-      // Ações diferentes para cada tabuleiro
       if (isPlayerBoard) {
         cell.addEventListener("click", () => placeShip(x, y, cell));
       } else {
@@ -37,24 +52,44 @@ function createBoard(boardElement, isPlayerBoard) {
   }
 }
 
-// 🔹 Posiciona navios no próprio tabuleiro
+createBoard(playerBoard, true);
+createBoard(enemyBoard, false);
+
+// ===== Lógica de posicionamento de navios =====
 function placeShip(x, y, cell) {
   if (!isPlacingShips) return;
-  if (cell.classList.contains("ship")) return;
+  if (!selectedShipSize) return alert("Escolha uma embarcação primeiro!");
 
-  cell.classList.add("ship");
-  playerShips.push({ x, y });
+  const shipCells = [];
+  for (let i = 0; i < selectedShipSize; i++) {
+    const targetX = orientation === "horizontal" ? x + i : x;
+    const targetY = orientation === "vertical" ? y + i : y;
+
+    if (targetX >= BOARD_SIZE || targetY >= BOARD_SIZE)
+      return alert("Fora dos limites!");
+    const targetCell = playerBoard.querySelector(
+      `.cell[data-x="${targetX}"][data-y="${targetY}"]`
+    );
+    if (targetCell.classList.contains("ship"))
+      return alert("Sobreposição detectada!");
+    shipCells.push(targetCell);
+  }
+
+  shipCells.forEach((c) => c.classList.add("ship"));
+  playerShips.push({ x, y, size: selectedShipSize, orientation });
   placedShips++;
+
+  selectedShipSize = null;
+  statusElem.textContent = "Navio posicionado!";
 
   if (placedShips >= TOTAL_SHIPS) {
     isPlacingShips = false;
-    statusElem.textContent = "Navios posicionados! Aguardando adversário...";
-    // Aqui futuramente enviaremos os navios ao servidor
+    statusElem.textContent = "✅ Todos os navios posicionados! Aguardando adversário...";
     socket.emit("placeShips", playerShips);
   }
 }
 
-// 🔹 Dispara um ataque no tabuleiro inimigo
+// ===== Ataques =====
 function attackEnemy(x, y, cell) {
   if (isPlacingShips) return alert("Posicione todos os navios primeiro!");
   if (cell.classList.contains("hit") || cell.classList.contains("miss")) return;
@@ -63,11 +98,7 @@ function attackEnemy(x, y, cell) {
   statusElem.textContent = `Você atacou [${x}, ${y}]`;
 }
 
-// Cria ambos os tabuleiros
-createBoard(playerBoard, true);
-createBoard(enemyBoard, false);
-
-// 🔹 Eventos do servidor
+// ===== Eventos do servidor =====
 socket.on("connect", () => {
   playerIdElem.textContent = socket.id;
   statusElem.textContent = "Conectado! Aguardando pareamento...";
@@ -88,7 +119,6 @@ socket.on("playerLeft", (playerId) => {
   roomIdElem.textContent = "Sala desconectada";
 });
 
-// 🔹 (Futuro) Receber resultado de ataques
 socket.on("attackResult", (data) => {
   const { x, y, result } = data;
   const cells = enemyBoard.querySelectorAll(".cell");
