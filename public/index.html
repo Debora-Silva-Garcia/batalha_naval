@@ -1,94 +1,62 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 
 <head>
   <meta charset="UTF-8">
-  <title>Batalha Naval Multiplayer</title>
+  <title>Batalha Naval</title>
   <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js"></script>
 </head>
 
 <body>
-  <h1>⚓ Batalha Naval Multiplayer</h1>
 
-  <div id="info">
-    <p><strong>Seu ID:</strong> <span id="playerId">...</span></p>
-    <p><strong>Sala:</strong> <span id="roomId">...</span></p>
-  </div>
+  <h1>⚓ Batalha Naval</h1>
 
-  <div id="status">Conectando ao servidor...</div>
+  <p>Jogador: <span id="playerId">???</span></p>
+  <p>Sala: <span id="roomId">---</span></p>
+  <h3 id="status">Conectando...</h3>
 
   <div id="boards">
 
-    <!-- Painel lateral -->
+    <!-- Painel de navios -->
     <div id="shipPanel">
-      <h3>Embarcações</h3>
+      <h3>Selecionar Navios</h3>
+
       <div id="shipSelection">
         <button class="shipBtn" data-size="5">🚢 Porta Avião (5)</button>
         <button class="shipBtn" data-size="4">🚤 Encouraçado (4)</button>
         <button class="shipBtn" data-size="3">⛵ Submarino (3)</button>
       </div>
-      <button id="rotateBtn">↩️ Rotacionar</button>
+
+      <button id="rotateBtn">Rotacionar</button>
+
       <p id="orientationInfo">Orientação: horizontal</p>
     </div>
 
-    <!-- Seu Tabuleiro -->
+    <!-- Tabuleiro do jogador -->
     <div class="board-container">
       <h2>Seu Tabuleiro</h2>
-
       <div class="board-wrapper">
-        <div class="coord-row">
-          <span></span>
-          <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
-          <span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
-        </div>
-
-        <div class="board-row">
-          <div class="coord-col">
-            <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
-            <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
-          </div>
-          <div id="playerBoard" class="board"></div>
-        </div>
+        <div class="board-grid" id="playerBoard"></div>
       </div>
     </div>
 
-    <!-- Tabuleiro do Oponente -->
+    <!-- Tabuleiro inimigo -->
     <div class="board-container">
-      <h2>Tabuleiro do Oponente</h2>
-
+      <h2>Tabuleiro Inimigo</h2>
       <div class="board-wrapper">
-        <div class="coord-row">
-          <span></span>
-          <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
-          <span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
-        </div>
-
-        <div class="board-row">
-          <div class="coord-col">
-            <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
-            <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
-          </div>
-          <div id="enemyBoard" class="board"></div>
-        </div>
+        <div class="board-grid" id="enemyBoard"></div>
       </div>
     </div>
-
   </div>
 
-  <div id="instructions">
-    <p>🛳️ Escolha uma embarcação e clique no seu tabuleiro para posicioná-la.<br>
-      🎯 Depois clique no tabuleiro inimigo para atacar!</p>
+  <!-- Pós jogo -->
+  <div id="postGameOptions" style="display:none;">
+    <h2>Fim de Jogo</h2>
+    <button class="btn" id="btnRematch">Revanche</button>
+    <button class="btn" id="btnNewMatch">Nova Partida</button>
   </div>
 
-  <!-- Opções pós-jogo -->
-  <div id="postGameOptions" style="display: none;">
-    <h3>⚓ Partida encerrada</h3>
-    <p>Deseja jogar novamente?</p>
-    <button id="btnRematch" class="btn">🔁 Revanche</button>
-    <button id="btnNewMatch" class="btn">🎲 Nova Partida</button>
-  </div>
-
-  <script src="/socket.io/socket.io.js"></script>
   <script src="script.js"></script>
 </body>
 
