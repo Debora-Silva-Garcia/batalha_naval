@@ -79,7 +79,6 @@ body {
   margin-bottom: 10px;
 }
 
-/* Wrapper com coordenadas */
 .board-wrapper {
   display: inline-block;
   background: #00334d;
@@ -90,7 +89,7 @@ body {
 
 .coord-row {
   display: grid;
-  grid-template-columns: 20px repeat(10, 40px);
+  grid-template-columns: 30px repeat(10, 30px);
   text-align: center;
   margin-bottom: 5px;
   color: #aeeaff;
@@ -104,7 +103,7 @@ body {
 
 .coord-col {
   display: grid;
-  grid-template-rows: 20px repeat(10, 40px);
+  grid-template-rows: repeat(10, 30px);
   margin-right: 5px;
 }
 
@@ -119,8 +118,8 @@ body {
 
 .board {
   display: grid;
-  grid-template-columns: repeat(10, 40px);
-  grid-template-rows: repeat(10, 40px);
+  grid-template-columns: repeat(10, 30px);
+  grid-template-rows: repeat(10, 30px);
   gap: 2px;
   background-color: #004466;
   padding: 5px;
@@ -128,11 +127,10 @@ body {
   border-radius: 5px;
 }
 
-/* Células */
+/* ===== Células ===== */
 .cell {
-  width: 40px;
-  height: 40px;
-  box-sizing: border-box;
+  width: 30px;
+  height: 30px;
   background-color: #006688;
   border-radius: 3px;
   cursor: pointer;
@@ -141,11 +139,6 @@ body {
   align-items: center;
   justify-content: center;
   font-weight: bold;
-}
-
-.cell:hover {
-  background-color: #00bbee;
-  transform: scale(1.08);
 }
 
 .cell.ship {
@@ -165,11 +158,22 @@ body {
   color: white;
 }
 
-#status {
-  margin-top: 20px;
-  font-weight: bold;
-  font-size: 18px;
-  color: #00ffcc;
+/* ===== PREVIEW ===== */
+
+/* Válido = verde */
+.cell.preview-valid {
+  background-color: #55ffaa !important;
+  opacity: 0.9;
+  transform: scale(1.05);
+  box-shadow: 0 0 6px rgba(85, 255, 170, 0.7);
+}
+
+/* Inválido = vermelho */
+.cell.preview-invalid {
+  background-color: #ff6666 !important;
+  opacity: 0.9;
+  transform: scale(1.05);
+  box-shadow: 0 0 6px rgba(255, 100, 100, 0.6);
 }
 
 /* ===== Pós-jogo ===== */
@@ -198,43 +202,4 @@ body {
 
 #postGameOptions .btn:hover {
   background: #00bbee;
-}
-
-/* preview visual durante posicionamento */
-.cell.preview-valid {
-  outline: 3px solid rgba(0, 255, 170, 0.6);
-  transform: scale(1.06);
-}
-
-.cell.preview-invalid {
-  outline: 3px solid rgba(255, 80, 80, 0.7);
-  transform: scale(1.06);
-}
-
-/* quando o board inimigo está desabilitado por não ser seu turno */
-.board.disabled {
-  pointer-events: none;
-  opacity: 0.6;
-  filter: grayscale(0.2);
-}
-
-/* responsividade: diminui células em telas menores */
-@media (max-width: 800px) {
-  .coord-row {
-    grid-template-columns: 14px repeat(10, 28px);
-  }
-
-  .coord-col {
-    grid-template-rows: 14px repeat(10, 28px);
-  }
-
-  .board {
-    grid-template-columns: repeat(10, 28px);
-    grid-template-rows: repeat(10, 28px);
-  }
-
-  .cell {
-    width: 28px;
-    height: 28px;
-  }
 }
