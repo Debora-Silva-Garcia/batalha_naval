@@ -8,6 +8,9 @@ const playerBoard = document.getElementById("playerBoard");
 const enemyBoard = document.getElementById("enemyBoard");
 const orientationInfo = document.getElementById("orientationInfo");
 
+// Painel de navios
+const shipSelection = document.getElementById("shipSelection");
+
 // Pós-jogo
 const postGame = document.getElementById("postGameOptions");
 const btnRematch = document.getElementById("btnRematch");
@@ -23,21 +26,48 @@ let orientation = "horizontal";
 let isMyTurn = false;
 const TOTAL_SHIPS = 3;
 
-// === Seleção de embarcações ===
-document.querySelectorAll(".shipBtn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    selectedShipSize = parseInt(btn.dataset.size);
-    selectedShipButton = btn;
-    statusElem.textContent = `Selecionado navio de tamanho ${selectedShipSize}`;
-  });
-});
+// === Função: recriar painel de embarcações ===
+function resetShipPanel() {
+  shipSelection.innerHTML = `
+    <button class="shipBtn" data-size="5">🚢 Porta Avião (5)</button>
+    <button class="shipBtn" data-size="4">🚤 Encouraçado (4)</button>
+    <button class="shipBtn" data-size="3">⛵ Submarino (3)</button>
+  `;
 
+  // Reativar evento de clique nos botões
+  document.querySelectorAll(".shipBtn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      selectedShipSize = parseInt(btn.dataset.size);
+      selectedShipButton = btn;
+      statusElem.textContent = `Selecionado navio de tamanho ${selectedShipSize}`;
+    });
+  });
+
+  // Restaurar estado visual dos botões caso tenham sido desabilitados antes
+  document.querySelectorAll(".shipBtn").forEach((b) => {
+    b.disabled = false;
+    b.style.opacity = "1";
+    // se o texto tiver o "✅" removemos qualquer marcação antiga
+    const size = b.dataset.size;
+    // define texto padrão sem sufixos
+    const label = size === "5" ? "🚢 Porta Avião (5)"
+      : size === "4" ? "🚤 Encouraçado (4)"
+        : "⛵ Submarino (3)";
+    b.textContent = label;
+  });
+
+  // garantir orientação padrão
+  orientationInfo.textContent = "Orientação: horizontal";
+  orientation = "horizontal";
+}
+
+// === Botão de rotacionar ===
 document.getElementById("rotateBtn").addEventListener("click", () => {
   orientation = orientation === "horizontal" ? "vertical" : "horizontal";
   orientationInfo.textContent = `Orientação: ${orientation}`;
 });
 
-// === Criação de tabuleiros ===
+// === Criar tabuleiros ===
 function createBoard(boardElement, isPlayerBoard) {
   boardElement.innerHTML = "";
   for (let y = 0; y < BOARD_SIZE; y++) {
@@ -57,22 +87,22 @@ function createBoard(boardElement, isPlayerBoard) {
     }
   }
 }
-createBoard(playerBoard, true);
-createBoard(enemyBoard, false);
 
+// === Reset Completo (usado na revanche) ===
 function resetBoards() {
   playerShips = [];
   placedShips = 0;
   isPlacingShips = true;
   selectedShipSize = null;
   selectedShipButton = null;
-  document.querySelectorAll(".shipBtn").forEach((b) => {
-    b.disabled = false;
-    b.style.opacity = "1";
-    b.textContent = `${b.textContent.split(" ")[0]} (${b.dataset.size})`;
-  });
+
+  // Restaurar painel de navios
+  resetShipPanel();
+
+  // Recriar tabuleiros
   createBoard(playerBoard, true);
   createBoard(enemyBoard, false);
+
   postGame.style.display = "none";
 }
 
@@ -85,11 +115,14 @@ function placeShip(x, y) {
   for (let i = 0; i < selectedShipSize; i++) {
     const tx = orientation === "horizontal" ? x + i : x;
     const ty = orientation === "vertical" ? y + i : y;
+
     if (tx >= BOARD_SIZE || ty >= BOARD_SIZE)
       return alert("Fora dos limites!");
+
     const cell = playerBoard.querySelector(`.cell[data-x="${tx}"][data-y="${ty}"]`);
     if (cell.classList.contains("ship"))
       return alert("Sobreposição detectada!");
+
     shipCells.push(cell);
   }
 
@@ -100,7 +133,10 @@ function placeShip(x, y) {
   if (selectedShipButton) {
     selectedShipButton.disabled = true;
     selectedShipButton.style.opacity = "0.5";
-    selectedShipButton.textContent += " ✅";
+    // garantir que não duplique marcação "✅"
+    if (!selectedShipButton.textContent.includes("✅")) {
+      selectedShipButton.textContent += " ✅";
+    }
     selectedShipButton = null;
   }
 
@@ -125,7 +161,7 @@ function attackEnemy(x, y, cell) {
   statusElem.textContent = `Você atacou [${x}, ${y}]`;
 }
 
-// === Eventos ===
+// === Eventos Socket ===
 socket.on("connect", () => {
   playerIdElem.textContent = socket.id;
   statusElem.textContent = "Conectado! Aguardando pareamento...";
@@ -137,7 +173,7 @@ socket.on("joinedRoom", (roomId) => {
 });
 
 socket.on("startGame", () => {
-  statusElem.textContent = "✅ Jogo iniciado! Posicione seus navios.";
+  statusElem.textContent = "🌊 Jogo iniciado! Posicione seus navios.";
 });
 
 socket.on("readyToPlay", () => {
@@ -146,17 +182,16 @@ socket.on("readyToPlay", () => {
 
 socket.on("turnUpdate", ({ turn }) => {
   isMyTurn = turn === socket.id;
-  statusElem.textContent = isMyTurn
-    ? "🟢 Seu turno!"
-    : "🔴 Turno do adversário...";
+  statusElem.textContent = isMyTurn ? "🟢 Seu turno!" : "🔴 Turno do adversário...";
 });
 
-// === Feedback visual ===
 socket.on("attackResult", ({ attacker, x, y, result }) => {
   const isMyAttack = attacker === socket.id;
   const board = isMyAttack ? enemyBoard : playerBoard;
+
   const cell = board.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
   if (!cell) return;
+
   cell.textContent = result === "hit" ? "❌" : "●";
   cell.classList.add(result === "hit" ? "hit" : "miss");
 });
@@ -180,10 +215,21 @@ btnNewMatch.addEventListener("click", () => {
   statusElem.textContent = "🎲 Procurando nova partida...";
 });
 
+// === Revanche iniciada ===
 socket.on("rematchStart", () => {
   resetBoards();
   statusElem.textContent = "🔄 Revanche iniciada! Posicione seus navios.";
 });
 
+// Mensagens genéricas e desconexão
 socket.on("message", (msg) => (statusElem.textContent = msg));
 socket.on("playerLeft", (id) => (statusElem.textContent = `⚠️ Jogador ${id} saiu.`));
+
+// ============================
+// Inicialização ao carregar a página
+// ============================
+// garante que o painel de navios sempre tenha listeners desde a primeira partida
+resetShipPanel();
+// cria tabuleiros iniciais
+createBoard(playerBoard, true);
+createBoard(enemyBoard, false);

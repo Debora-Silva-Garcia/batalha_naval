@@ -18,7 +18,8 @@
   <div id="status">Conectando ao servidor...</div>
 
   <div id="boards">
-    <!-- Painel lateral com embarcações -->
+
+    <!-- Painel lateral -->
     <div id="shipPanel">
       <h3>Embarcações</h3>
       <div id="shipSelection">
@@ -30,16 +31,48 @@
       <p id="orientationInfo">Orientação: horizontal</p>
     </div>
 
-    <!-- Tabuleiros -->
+    <!-- Seu Tabuleiro -->
     <div class="board-container">
       <h2>Seu Tabuleiro</h2>
-      <div id="playerBoard" class="board"></div>
+
+      <div class="board-wrapper">
+        <div class="coord-row">
+          <span></span>
+          <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
+          <span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
+        </div>
+
+        <div class="board-row">
+          <div class="coord-col">
+            <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+            <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
+          </div>
+          <div id="playerBoard" class="board"></div>
+        </div>
+      </div>
     </div>
 
+    <!-- Tabuleiro do Oponente -->
     <div class="board-container">
       <h2>Tabuleiro do Oponente</h2>
-      <div id="enemyBoard" class="board"></div>
+
+      <div class="board-wrapper">
+        <div class="coord-row">
+          <span></span>
+          <span>A</span><span>B</span><span>C</span><span>D</span><span>E</span>
+          <span>F</span><span>G</span><span>H</span><span>I</span><span>J</span>
+        </div>
+
+        <div class="board-row">
+          <div class="coord-col">
+            <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span>
+            <span>6</span><span>7</span><span>8</span><span>9</span><span>10</span>
+          </div>
+          <div id="enemyBoard" class="board"></div>
+        </div>
+      </div>
     </div>
+
   </div>
 
   <div id="instructions">
@@ -47,7 +80,7 @@
       🎯 Depois clique no tabuleiro inimigo para atacar!</p>
   </div>
 
-  <!-- Opções após o fim do jogo -->
+  <!-- Opções pós-jogo -->
   <div id="postGameOptions" style="display: none;">
     <h3>⚓ Partida encerrada</h3>
     <p>Deseja jogar novamente?</p>

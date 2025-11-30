@@ -15,7 +15,7 @@ body {
   margin-top: 30px;
 }
 
-/* ===== Painel lateral ===== */
+/* ===== Painel de Navios ===== */
 #shipPanel {
   background-color: #004466;
   border: 3px solid #0099cc;
@@ -79,6 +79,44 @@ body {
   margin-bottom: 10px;
 }
 
+/* Wrapper com coordenadas */
+.board-wrapper {
+  display: inline-block;
+  background: #00334d;
+  padding: 10px;
+  border-radius: 10px;
+  border: 2px solid #00aaff;
+}
+
+.coord-row {
+  display: grid;
+  grid-template-columns: 30px repeat(10, 30px);
+  text-align: center;
+  margin-bottom: 5px;
+  color: #aeeaff;
+  font-weight: bold;
+  font-size: 14px;
+}
+
+.board-row {
+  display: flex;
+}
+
+.coord-col {
+  display: grid;
+  grid-template-rows: repeat(10, 30px);
+  margin-right: 5px;
+}
+
+.coord-col span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aeeaff;
+  font-weight: bold;
+  font-size: 14px;
+}
+
 .board {
   display: grid;
   grid-template-columns: repeat(10, 30px);
@@ -88,16 +126,16 @@ body {
   padding: 5px;
   border: 3px solid #0099cc;
   border-radius: 5px;
-  justify-content: center;
 }
 
+/* Células */
 .cell {
   width: 30px;
   height: 30px;
-  background-color: #0077aa;
+  background-color: #006688;
   border-radius: 3px;
   cursor: pointer;
-  transition: background-color 0.2s;
+  transition: 0.15s ease;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -105,23 +143,24 @@ body {
 }
 
 .cell:hover {
-  background-color: #00aaff;
+  background-color: #00bbee;
+  transform: scale(1.08);
 }
 
 .cell.ship {
-  background-color: #00ffcc;
-  /* embarcação posicionada */
+  background-color: #00e6b8;
+  box-shadow: 0 0 6px #00ffcc;
 }
 
 .cell.hit {
-  background-color: #ff4444;
-  /* tiro certeiro */
+  background-color: #ff5555 !important;
+  box-shadow: 0 0 6px #ff4444;
   color: white;
 }
 
 .cell.miss {
-  background-color: #222;
-  /* tiro errado */
+  background-color: #222 !important;
+  box-shadow: 0 0 6px #555;
   color: white;
 }
 
@@ -142,11 +181,6 @@ body {
   margin: 25px auto;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
   text-align: center;
-}
-
-#postGameOptions h3 {
-  margin: 0 0 10px 0;
-  color: #00ffcc;
 }
 
 #postGameOptions .btn {
