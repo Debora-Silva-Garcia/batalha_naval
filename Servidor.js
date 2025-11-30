@@ -1,3 +1,4 @@
+// Servidor.js (versão com permanentId)
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -11,42 +12,67 @@ app.use(express.static("public"));
 const PORT = process.env.PORT || 3000;
 const rooms = {};
 
+// Mapeamento permanentId -> socket.id (atual)
+const playerSockets = {};
+
 // ===== Função auxiliar =====
-function getRoomByPlayer(playerId) {
+// Retorna roomId que contém o permanentId ou null
+function getRoomByPlayer(permanentId) {
   for (const roomId in rooms) {
     const room = rooms[roomId];
-    if (room.players.includes(playerId)) return roomId;
+    if (room.players.includes(permanentId)) return roomId;
   }
   return null;
 }
 
+// assignToAvailableRoom: usa socket.permanentId (deve estar setado)
 function assignToAvailableRoom(socket) {
+  const permanentId = socket.permanentId;
+  if (!permanentId) {
+    console.warn("assignToAvailableRoom chamado sem permanentId");
+    socket.emit("message", "Erro interno: permanentId não encontrado.");
+    return;
+  }
+
+  // evita entrar duas vezes na mesma sala
+  const already = getRoomByPlayer(permanentId);
+  if (already) {
+    socket.join(already);
+    socket.emit("joinedRoom", already);
+    console.log(`Jogador ${permanentId} já estava em ${already}, reconectado ao room.`);
+    return;
+  }
+
   let roomJoined = null;
   for (const roomId in rooms) {
     const room = rooms[roomId];
     if (room.players.length < 2) {
-      room.players.push(socket.id);
+      room.players.push(permanentId);
       roomJoined = roomId;
       break;
     }
   }
 
   if (!roomJoined) {
-    const newRoomId = `room-${socket.id}`;
+    const newRoomId = `room-${permanentId}`;
     rooms[newRoomId] = {
-      players: [socket.id],
-      ships: {},
-      hitsAgainst: {},
-      turn: null,
+      players: [permanentId],        // armazenamos permanentIds
+      ships: {},                    // ships[permanentId] = [...]
+      hitsAgainst: {},              // hitsAgainst[permanentId] = [...]
+      turn: null,                   // permanentId que tem o turno
       gameStarted: false,
-      lock: false
+      lock: false,
+      rematchVotes: null
     };
     roomJoined = newRoomId;
   }
 
   socket.join(roomJoined);
   socket.emit("joinedRoom", roomJoined);
-  console.log(`Jogador ${socket.id} entrou na sala ${roomJoined}`);
+  console.log(`Jogador ${permanentId} entrou na sala ${roomJoined}`);
+
+  // atualiza mapeamento socket (importante)
+  playerSockets[permanentId] = socket.id;
 
   const room = rooms[roomJoined];
   if (room.players.length === 2) {
@@ -55,35 +81,85 @@ function assignToAvailableRoom(socket) {
     io.to(roomJoined).emit("startGame", { roomId: roomJoined });
     // informar quem terá o turno quando o jogo começar
     io.to(roomJoined).emit("turnUpdate", { turn: room.turn });
+    // envia yourTurn para o socket ativo (se conectado)
+    const turnSocket = playerSockets[room.turn];
+    if (turnSocket) io.to(turnSocket).emit("yourTurn");
   }
 }
 
 // ====== Conexão ======
 io.on("connection", (socket) => {
-  console.log("Novo jogador conectado:", socket.id);
+  console.log("Novo socket conectado:", socket.id);
 
+  // pega permanentId enviado pelo cliente (via io({ query: { permanentId } }))
+  const permanentId = socket.handshake.query && socket.handshake.query.permanentId;
+  if (!permanentId) {
+    console.warn("Conexão sem permanentId. Rejeitando.");
+    socket.emit("message", "Erro: permanentId ausente. Recarregue a página.");
+    socket.disconnect(true);
+    return;
+  }
+
+  // associa ao socket e ao mapa global
+  socket.permanentId = permanentId;
+  playerSockets[permanentId] = socket.id;
+
+  console.log(`Conectado: permanentId=${permanentId} socket=${socket.id}`);
+
+  // Verifica se o jogador já pertence a alguma sala (reconexão)
+  const existingRoomId = getRoomByPlayer(permanentId);
+  if (existingRoomId) {
+    const room = rooms[existingRoomId];
+    socket.join(existingRoomId);
+
+    console.log(`🔌 Reconexão detectada: ${permanentId} entrou em ${existingRoomId} com socket ${socket.id}`);
+
+    // Enviar estado completo da partida para o jogador reconectado
+    const gameState = {
+      ships: room.ships,
+      hitsAgainst: room.hitsAgainst,
+      turn: room.turn,
+      players: room.players,
+      gameStarted: room.gameStarted
+    };
+
+    socket.emit("restoreGameState", gameState);
+    socket.emit("joinedRoom", existingRoomId);
+    io.to(existingRoomId).emit("message", `Jogador ${permanentId} reconectou.`);
+    io.to(existingRoomId).emit("turnUpdate", { turn: room.turn });
+
+    // também notificar jogador cujo turno é atualmente (se conectado)
+    const turnSocket = playerSockets[room.turn];
+    if (turnSocket) io.to(turnSocket).emit("yourTurn");
+
+    // já retornamos pois reconexão tratada
+    return;
+  }
+
+  // Se não estava em sala, fazemos matchmaking normal
   assignToAvailableRoom(socket);
 
   // ===== Receber posições dos navios =====
   socket.on("placeShips", (ships) => {
-    const roomId = getRoomByPlayer(socket.id);
+    const roomId = getRoomByPlayer(permanentId);
     if (!roomId) return;
     const r = rooms[roomId];
 
-    r.ships[socket.id] = ships;
-    if (!Array.isArray(r.hitsAgainst[socket.id])) r.hitsAgainst[socket.id] = [];
+    r.ships[permanentId] = ships;
+    if (!Array.isArray(r.hitsAgainst[permanentId])) r.hitsAgainst[permanentId] = [];
 
-    console.log(`Navios de ${socket.id} registrados em ${roomId}`);
+    console.log(`Navios de ${permanentId} registrados em ${roomId}`);
 
     // Quando ambos tiverem enviado seus navios:
-    if (Object.keys(r.ships).length === 2) {
+    // (verificamos se ambos players têm chave em r.ships)
+    const readyCount = r.players.filter(pid => Array.isArray(r.ships[pid])).length;
+    if (readyCount === 2) {
       // inicializa hitsAgainst para ambos (defensivo)
       for (const pid of r.players) {
         if (!Array.isArray(r.hitsAgainst[pid])) r.hitsAgainst[pid] = [];
       }
 
-      // ------ CORREÇÃO IMPORTANTE ------
-      // Agora sim marcamos o jogo como iniciado — assim o servidor aceitará ataques.
+      // marca jogo iniciado
       r.gameStarted = true;
       // garantir turno (começa pelo primeiro jogador da sala)
       r.turn = r.turn || r.players[0];
@@ -91,14 +167,16 @@ io.on("connection", (socket) => {
       // Notifica clientes
       io.to(roomId).emit("readyToPlay");
       io.to(roomId).emit("turnUpdate", { turn: r.turn });
-      io.to(r.turn).emit("yourTurn"); // compatibilidade/UX
+      const turnSocket = playerSockets[r.turn];
+      if (turnSocket) io.to(turnSocket).emit("yourTurn");
+
       console.log(`Sala ${roomId} pronta para jogar. Turno: ${r.turn}`);
     }
   });
 
   // ===== Receber ataque =====
   socket.on("attack", ({ x, y }) => {
-    const roomId = getRoomByPlayer(socket.id);
+    const roomId = getRoomByPlayer(permanentId);
     if (!roomId) return;
     const r = rooms[roomId];
 
@@ -113,13 +191,13 @@ io.on("connection", (socket) => {
     }
     r.lock = true;
 
-    if (socket.id !== r.turn) {
+    if (permanentId !== r.turn) {
       socket.emit("message", "⛔ Não é seu turno!");
       r.lock = false;
       return;
     }
 
-    const opponentId = r.players.find((id) => id !== socket.id);
+    const opponentId = r.players.find((id) => id !== permanentId);
     if (!opponentId || !r.ships[opponentId]) {
       socket.emit("message", "Oponente não pronto.");
       r.lock = false;
@@ -129,7 +207,7 @@ io.on("connection", (socket) => {
     if (!Array.isArray(r.hitsAgainst[opponentId])) r.hitsAgainst[opponentId] = [];
 
     const already = r.hitsAgainst[opponentId].some(
-      (h) => h.x === x && h.y === y && h.by === socket.id
+      (h) => h.x === x && h.y === y && h.by === permanentId
     );
     if (already) {
       socket.emit("message", "Você já atacou esse quadrado.");
@@ -151,16 +229,21 @@ io.on("connection", (socket) => {
       if (hit) break;
     }
 
-    r.hitsAgainst[opponentId].push({ x, y, result: hit ? "hit" : "miss", by: socket.id });
+    r.hitsAgainst[opponentId].push({ x, y, result: hit ? "hit" : "miss", by: permanentId });
 
-    io.to(roomId).emit("attackResult", { attacker: socket.id, x, y, result: hit ? "hit" : "miss" });
+    // notifica resultado para ambos (attacker é permanentId)
+    io.to(roomId).emit("attackResult", { attacker: permanentId, x, y, result: hit ? "hit" : "miss" });
 
     // Troca o turno (uma jogada por vez)
     r.turn = opponentId;
     io.to(roomId).emit("turnUpdate", { turn: r.turn });
 
+    // notifica yourTurn no socket do próximo jogador (se conectado)
+    const nextSocket = playerSockets[r.turn];
+    if (nextSocket) io.to(nextSocket).emit("yourTurn");
+
     // Verifica vitória
-    const opponentCells = r.ships[opponentId].flatMap((ship) => {
+    const opponentCells = (r.ships[opponentId] || []).flatMap((ship) => {
       const cells = [];
       for (let i = 0; i < ship.size; i++) {
         cells.push({
@@ -180,9 +263,9 @@ io.on("connection", (socket) => {
     }
 
     if (hitsSet.size >= opponentCells.length) {
-      // em vez de deletar imediatamente, avisamos com opções e aguardamos decisão dos jogadores
-      io.to(roomId).emit("gameOverOptions", { winner: socket.id });
-      console.log(`Sala ${roomId}: vencedor ${socket.id}`);
+      // avisa o vencedor: usamos permanentId
+      io.to(roomId).emit("gameOverOptions", { winner: permanentId });
+      console.log(`Sala ${roomId}: vencedor ${permanentId}`);
       // note: não deletamos room ainda — aguardamos rematch/newMatch
     }
 
@@ -191,15 +274,15 @@ io.on("connection", (socket) => {
 
   // ===== Revanche / Nova partida =====
   socket.on("rematchRequest", () => {
-    const roomId = getRoomByPlayer(socket.id);
+    const roomId = getRoomByPlayer(permanentId);
     if (!roomId) return;
     const room = rooms[roomId];
 
     if (!room.rematchVotes) room.rematchVotes = new Set();
-    room.rematchVotes.add(socket.id);
+    room.rematchVotes.add(permanentId);
 
     if (room.rematchVotes.size === 2) {
-      // reinicia estado da sala para nova partida com os mesmos jogadores
+      // reinicia estado da sala para nova partida com os mesmos permanentIds
       room.ships = {};
       room.hitsAgainst = {};
       room.turn = room.players[0];
@@ -215,37 +298,52 @@ io.on("connection", (socket) => {
   });
 
   socket.on("newMatchRequest", () => {
-    const roomId = getRoomByPlayer(socket.id);
+    const roomId = getRoomByPlayer(permanentId);
     if (!roomId) return;
     const room = rooms[roomId];
 
     // sai da sala atual e entra no matchmaking normal
     socket.leave(roomId);
-    room.players = room.players.filter((id) => id !== socket.id);
-    // se sobrar um jogador solo, informe e limpe a sala
+    room.players = room.players.filter((id) => id !== permanentId);
+
+    // informa ao(s) players que alguém saiu
+    io.to(roomId).emit("playerLeft", permanentId);
+
+    // se sobrar um jogador solo, delete a sala
     if (room.players.length === 1) {
       const remaining = room.players[0];
-      io.to(roomId).emit("playerLeft", socket.id);
-      // se desejar manter o jogador sozinho em sala para esperar, não delete. Aqui optamos por remover a sala.
+      // notifica o jogador restante que adversário saiu
+      const remainingSocket = playerSockets[remaining];
+      if (remainingSocket) io.to(remainingSocket).emit("message", "O adversário saiu. Você será realocado.");
       delete rooms[roomId];
+      console.log(`Sala ${roomId} removida (novo jogo solicitado por ${permanentId}).`);
     } else if (room.players.length === 0) {
       delete rooms[roomId];
     }
 
+    // reafiliamos o solicitante a matchmaking (com seu permanentId já setado no socket)
     assignToAvailableRoom(socket);
   });
 
   // ===== Desconexão =====
   socket.on("disconnect", () => {
-    console.log("Jogador desconectado:", socket.id);
+    console.log("Socket desconectado:", socket.id, "permanentId:", permanentId);
+
+    // marca socket como desconectado no playerSockets
+    if (playerSockets[permanentId] === socket.id) {
+      // remove mapping para indicar que o jogador está offline
+      delete playerSockets[permanentId];
+    }
+
+    // notifica sala caso esteja presente (mas NÃO deletamos a sala)
     for (const roomId in rooms) {
       const room = rooms[roomId];
-      const index = room.players.indexOf(socket.id);
+      const index = room.players.indexOf(permanentId);
       if (index !== -1) {
-        io.to(roomId).emit("playerLeft", socket.id);
-        delete rooms[roomId];
-        console.log(`Sala ${roomId} removida.`);
-        break;
+        io.to(roomId).emit("playerLeft", permanentId);
+        console.log(`Jogador ${permanentId} desconectou da sala ${roomId}, aguardando reconexão.`);
+        // não removemos o room — permitindo reconexão
+        return;
       }
     }
   });
