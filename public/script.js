@@ -341,26 +341,39 @@ popupAccept.addEventListener("click", () => {
   socket.emit("rematchRequest");
 });
 
-// Recusar revanhce
+// Recusar revanche
 popupDecline.addEventListener("click", () => {
   rematchPopup.classList.add("hidden");
   popupActive = false;
   statusDisplay.innerText = "Você recusou a revanche.";
 });
 
-// Ambos aceitaram
+// Ambos aceitaram — REINICIALIZAÇÃO COMPLETA DA PARTIDA
 socket.on("rematchStart", () => {
+
+  // 🔥 recria tabuleiros e listeners
   resetBoards();
+
+  // 🔥 limpa variáveis
   placedShips = [];
   shipsPlacedCount = { 5: 0, 4: 0, 3: 0 };
   attackedCells.clear();
+  placingShip = null;
+  previewCells = [];
+  myTurn = false;
 
+  // 🔥 reabilita tabuleiro inimigo — ESSENCIAL!
+  enemyWrapper.classList.remove("enemy-disabled");
+  enemyWrapper.classList.add("enemy-enabled");
+
+  // UI
   postGameMenu.style.display = "none";
   rematchPopup.classList.add("hidden");
+  popupActive = false;
 
-  statusDisplay.innerText =
-    "Revanche iniciada! Posicione seus navios.";
+  statusDisplay.innerText = "Revanche iniciada! Posicione seus navios.";
 });
+
 
 // ------------------------------------
 // NOVA PARTIDA

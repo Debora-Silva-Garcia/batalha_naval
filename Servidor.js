@@ -3,14 +3,16 @@ const app = express();
 const http = require("http").createServer(app);
 const io = require("socket.io")(http);
 
+const PORT = process.env.PORT || 8080;   // 🌎 Render binding
+
 app.use(express.static(__dirname + "/public"));
 
 // -----------------------------
 // Estruturas de dados
 // -----------------------------
 
-let rooms = {};           // { roomId: [socket1, socket2] }
-let players = {};         // players[socketId] = { roomId, ships, hits, attacked, ready, wantsRematch }
+let rooms = {};
+let players = {};
 
 // -----------------------------
 // Funções auxiliares
@@ -55,7 +57,6 @@ function validateShips(ships) {
       let x = ship.orientation === "horizontal" ? ship.x + i : ship.x;
       let y = ship.orientation === "vertical" ? ship.y + i : ship.y;
 
-      // Fora do tabuleiro
       if (x < 0 || x > 9 || y < 0 || y > 9) return false;
 
       const key = `${x},${y}`;
@@ -73,8 +74,12 @@ function validateShips(ships) {
 // -----------------------------
 
 function autoJoin(socket) {
+  console.log(`🟦 [AUTOJOIN] Tentando parear ${socket.id}`);
+
   for (const roomId in rooms) {
     if (rooms[roomId].length === 1) {
+      console.log(`➡️ Sala encontrada (${roomId}). Conectando ${socket.id}`);
+
       rooms[roomId].push(socket.id);
 
       players[socket.id] = {
@@ -89,10 +94,13 @@ function autoJoin(socket) {
       socket.join(roomId);
       socket.emit("joinedRoom", roomId);
       io.to(roomId).emit("startGame");
+
+      console.log(`✅ Jogador pareado em ${roomId}`);
       return;
     }
   }
 
+  // Criar sala nova
   const newRoom = "room-" + socket.id;
   rooms[newRoom] = [socket.id];
 
@@ -107,6 +115,8 @@ function autoJoin(socket) {
 
   socket.join(newRoom);
   socket.emit("joinedRoom", newRoom);
+
+  console.log(`🆕 Criada nova sala ${newRoom} para ${socket.id}`);
 }
 
 // -----------------------------
@@ -114,17 +124,20 @@ function autoJoin(socket) {
 // -----------------------------
 
 io.on("connection", (socket) => {
-  console.log("Cliente conectado:", socket.id);
+  console.log(`🟢 Cliente conectado: ${socket.id}`);
 
   autoJoin(socket);
 
   // -----------------------------
-  // Recebe navios
+  // Recebimento de navios
   // -----------------------------
   socket.on("placeShips", (ships) => {
+    console.log(`🚢 Recebido navios do jogador ${socket.id}`, ships);
+
     const p = players[socket.id];
 
     if (!validateShips(ships)) {
+      console.log(`❌ Navios inválidos do jogador ${socket.id}`);
       socket.emit("invalidShips");
       return;
     }
@@ -136,7 +149,10 @@ io.on("connection", (socket) => {
     const [p1, p2] = rooms[roomId];
 
     if (p1 && p2 && players[p1].ready && players[p2].ready) {
+      console.log(`🎮 Partida iniciando na sala ${roomId}`);
       io.to(roomId).emit("readyToPlay");
+
+      console.log(`▶️ Turno inicial: ${p1}`);
       io.to(roomId).emit("turnUpdate", { turn: p1 });
     }
   });
@@ -145,6 +161,8 @@ io.on("connection", (socket) => {
   // Ataque
   // -----------------------------
   socket.on("attack", ({ x, y }) => {
+    console.log(`🎯 Jogador ${socket.id} atacou (${x}, ${y})`);
+
     const p = players[socket.id];
     const roomId = p.roomId;
     const enemyId = getOpponent(roomId, socket.id);
@@ -152,8 +170,8 @@ io.on("connection", (socket) => {
 
     const key = `${x},${y}`;
 
-    // Já atacou esse ponto?
     if (p.attacked.has(key)) {
+      console.log("⚠️ Ataque repetido ignorado.");
       socket.emit("attackRejected", { reason: "duplicate" });
       return;
     }
@@ -161,7 +179,6 @@ io.on("connection", (socket) => {
     p.attacked.add(key);
 
     const hit = cellBelongsToShip(enemy.ships, x, y);
-
     if (hit) enemy.hits.add(key);
 
     io.to(roomId).emit("attackResult", {
@@ -173,11 +190,12 @@ io.on("connection", (socket) => {
 
     // Verifica vitória
     if (allShipsSunk(enemy)) {
+      console.log(`🏆 Jogador ${socket.id} venceu!`);
       io.to(roomId).emit("gameOverOptions", { winner: socket.id });
       return;
     }
 
-    // Turno alternado
+    console.log(`🔄 Alternando turno → ${enemyId}`);
     io.to(roomId).emit("turnUpdate", { turn: enemyId });
   });
 
@@ -188,18 +206,17 @@ io.on("connection", (socket) => {
     const p = players[socket.id];
     const roomId = p.roomId;
 
+    console.log(`🔁 ${socket.id} solicitou revanche na sala ${roomId}`);
+
     p.wantsRematch = true;
 
-    // Notifica adversário
     socket.to(roomId).emit("opponentRematchRequest");
 
     const [p1, p2] = rooms[roomId];
 
-    if (
-      p1 && p2 &&
-      players[p1].wantsRematch &&
-      players[p2].wantsRematch
-    ) {
+    if (p1 && p2 && players[p1].wantsRematch && players[p2].wantsRematch) {
+      console.log(`🔥 Ambos aceitaram a revanche na sala ${roomId}`);
+
       // Reset
       for (const pid of rooms[roomId]) {
         players[pid].ships = [];
@@ -210,14 +227,20 @@ io.on("connection", (socket) => {
       }
 
       io.to(roomId).emit("rematchStart");
+
+      // 🔥 FIX IMPORTANTE — reiniciar turno
+      console.log(`▶️ Turno iniciado após revanche: ${p1}`);
+      io.to(roomId).emit("turnUpdate", { turn: p1 });
     }
   });
 
   // -----------------------------
-  // Nova partida (reset total)
+  // Nova partida
   // -----------------------------
   socket.on("newMatchRequest", () => {
     const roomId = players[socket.id].roomId;
+
+    console.log(`🆕 Nova partida solicitada na sala ${roomId}`);
 
     io.to(roomId).emit("forceReset");
 
@@ -231,6 +254,8 @@ io.on("connection", (socket) => {
     }
 
     delete rooms[roomId];
+
+    console.log(`🗑️ Sala ${roomId} removida`);
   });
 
   // -----------------------------
@@ -242,19 +267,23 @@ io.on("connection", (socket) => {
 
     const roomId = p.roomId;
 
-    console.log("Cliente saiu:", socket.id);
+    console.log(`🔴 Cliente desconectou: ${socket.id}`);
+
     io.to(roomId).emit("playerLeft", socket.id);
 
     rooms[roomId] = rooms[roomId].filter(id => id !== socket.id);
     delete players[socket.id];
 
-    if (rooms[roomId].length === 0) delete rooms[roomId];
+    if (rooms[roomId].length === 0) {
+      delete rooms[roomId];
+      console.log(`🗑️ Sala ${roomId} esvaziada e removida`);
+    }
   });
 });
 
 // -----------------------------
 // Inicia servidor
 // -----------------------------
-http.listen(8080, () => {
-  console.log("Servidor rodando em http://localhost:8080");
+http.listen(PORT, () => {
+  console.log(`🚀 Servidor rodando na porta ${PORT}`);
 });
