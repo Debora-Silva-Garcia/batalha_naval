@@ -2,34 +2,30 @@
 <html lang="pt-br">
 
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Batalha Naval</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css" />
   <script src="/socket.io/socket.io.js"></script>
 </head>
 
 <body>
-
   <h1>⚓ Batalha Naval</h1>
 
-  <p>Jogador: <span id="playerId">???</span></p>
+  <p>Jogador: <span id="playerId">---</span></p>
   <p>Sala: <span id="roomId">---</span></p>
-  <h3 id="status">Conectando...</h3>
+  <h2 id="status">Conectando...</h2>
 
   <div id="boards">
 
-    <!-- Painel de navios -->
-    <div id="shipPanel">
+    <!-- Painel de seleção de navios -->
+    <div id="shipPanel" class="side-panel">
       <h3>Selecionar Navios</h3>
 
-      <div id="shipSelection">
-        <button class="shipBtn" data-size="5">🚢 Porta Avião (5)</button>
-        <button class="shipBtn" data-size="4">🚤 Encouraçado (4)</button>
-        <button class="shipBtn" data-size="3">⛵ Submarino (3)</button>
-      </div>
+      <button class="shipBtn" data-size="5">🚢 Porta Avião (5)</button>
+      <button class="shipBtn" data-size="4">⛴️ Encouraçado (4)</button>
+      <button class="shipBtn" data-size="3">⛵ Submarino (3)</button>
 
-      <button id="rotateBtn">Rotacionar</button>
-
+      <button id="rotateBtn" class="rotate-btn">Rotacionar</button>
       <p id="orientationInfo">Orientação: horizontal</p>
     </div>
 
@@ -44,8 +40,31 @@
     <!-- Tabuleiro inimigo -->
     <div class="board-container">
       <h2>Tabuleiro Inimigo</h2>
-      <div class="board-wrapper">
+      <div class="board-wrapper enemy-enabled" id="enemyWrapper">
         <div class="board-grid" id="enemyBoard"></div>
+      </div>
+    </div>
+
+    <!-- Painel de Regras -->
+    <div id="rulesPanel" class="side-panel">
+      <h3>Regras</h3>
+      <ul>
+        <li>Posicione seus 3 navios.</li>
+        <li>Uma vez por turno.</li>
+        <li>❌ = acerto, ● = erro.</li>
+        <li>Vence quem afundar todos os navios inimigos.</li>
+      </ul>
+    </div>
+
+  </div>
+
+  <!-- POP-UP DE REVANCHE -->
+  <div id="rematchPopup" class="popup hidden">
+    <div class="popup-box">
+      <h2>O adversário solicitou revanche!</h2>
+      <div class="popup-buttons">
+        <button id="popupAccept" class="btn accept">ACEITAR</button>
+        <button id="popupDecline" class="btn decline">RECUSAR</button>
       </div>
     </div>
   </div>

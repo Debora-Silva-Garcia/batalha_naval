@@ -1,295 +1,395 @@
 const socket = io();
 
-const playerIdElem = document.getElementById("playerId");
-const roomIdElem = document.getElementById("roomId");
-const statusElem = document.getElementById("status");
+// ------------------------------------
+// ELEMENTOS DOM
+// ------------------------------------
 
 const playerBoard = document.getElementById("playerBoard");
 const enemyBoard = document.getElementById("enemyBoard");
+const enemyWrapper = document.getElementById("enemyWrapper");
 
+const statusDisplay = document.getElementById("status");
+const rotateBtn = document.getElementById("rotateBtn");
 const orientationInfo = document.getElementById("orientationInfo");
-const shipSelection = document.getElementById("shipSelection");
 
-const postGame = document.getElementById("postGameOptions");
+const shipButtons = document.querySelectorAll(".shipBtn");
+
+const postGameMenu = document.getElementById("postGameOptions");
 const btnRematch = document.getElementById("btnRematch");
 const btnNewMatch = document.getElementById("btnNewMatch");
 
-const BOARD_SIZE = 10;
+// POP-UP
+const rematchPopup = document.getElementById("rematchPopup");
+const popupAccept = document.getElementById("popupAccept");
+const popupDecline = document.getElementById("popupDecline");
 
-let playerShips = [];
-let selectedShipSize = null;
-let selectedShipButton = null;
+let popupActive = false;
+
+// ------------------------------------
+// Variáveis do Jogo
+// ------------------------------------
+
+let myId = null;
+let myRoom = null;
+
+let myTurn = false;
+
+let placingShip = null;
 let orientation = "horizontal";
-let isPlacingShips = true;
-let isMyTurn = false;
 
-let placedShips = 0;
-const TOTAL_SHIPS = 3;
+// VALIDAÇÃO: só 1 navio de cada tipo
+let shipsAllowed = {
+  5: 1,
+  4: 1,
+  3: 1,
+};
 
-window._previewCells = [];
+let shipsPlacedCount = {
+  5: 0,
+  4: 0,
+  3: 0,
+};
 
-/* --------------------------------------------
-   CRIA TABULEIRO ALINHADO
---------------------------------------------- */
-function createBoard(boardElement, isPlayerBoard) {
-  boardElement.innerHTML = "";
+let placedShips = [];
 
-  const grid = document.createElement("div");
-  grid.classList.add("board-grid");
-  boardElement.appendChild(grid);
+let previewCells = [];
+let attackedCells = new Set();
 
-  const letters = "ABCDEFGHIJ";
+// ------------------------------------
+// Inicialização
+// ------------------------------------
 
-  // canto vazio
-  grid.appendChild(document.createElement("div"));
+createBoard(playerBoard, "player");
+createBoard(enemyBoard, "enemy");
 
-  // letras A–J
-  for (let x = 0; x < BOARD_SIZE; x++) {
-    const top = document.createElement("div");
-    top.classList.add("coord-top");
-    top.textContent = letters[x];
-    grid.appendChild(top);
-  }
+function createBoard(board, type) {
+  board.innerHTML = "";
 
-  // linhas + células
-  for (let y = 0; y < BOARD_SIZE; y++) {
-    const left = document.createElement("div");
-    left.classList.add("coord-left");
-    left.textContent = y + 1;
-    grid.appendChild(left);
+  board.appendChild(coordCell(""));
+  for (let x = 0; x < 10; x++)
+    board.appendChild(coordCell(String.fromCharCode(65 + x)));
 
-    for (let x = 0; x < BOARD_SIZE; x++) {
+  for (let y = 0; y < 10; y++) {
+    board.appendChild(coordCell(y));
+
+    for (let x = 0; x < 10; x++) {
       const cell = document.createElement("div");
       cell.classList.add("cell");
       cell.dataset.x = x;
       cell.dataset.y = y;
 
-      if (isPlayerBoard) {
-        cell.addEventListener("click", () => placeShip(x, y));
-        cell.addEventListener("mouseenter", () => previewShip(x, y));
-        cell.addEventListener("mouseleave", () => clearPreview());
+      if (type === "enemy") {
+        cell.addEventListener("click", () => onAttack(x, y));
       } else {
-        cell.addEventListener("click", () => attackEnemy(x, y, cell));
+        cell.addEventListener("mouseenter", () => shipPreview(x, y));
+        cell.addEventListener("mouseleave", () => clearPreview());
+        cell.addEventListener("click", () => placeShip(x, y));
       }
-
-      grid.appendChild(cell);
+      board.appendChild(cell);
     }
   }
 }
 
-/* --------------------------------------------
-   RESET COMPLETO
---------------------------------------------- */
-function resetBoards() {
-  playerShips = [];
-  placedShips = 0;
-  isPlacingShips = true;
-  selectedShipSize = null;
-
-  clearPreview();
-  resetShipPanel();
-  createBoard(playerBoard, true);
-  createBoard(enemyBoard, false);
-
-  postGame.style.display = "none";
-  statusElem.textContent = "Posicione seus navios...";
+function coordCell(text) {
+  const c = document.createElement("div");
+  c.classList.add("coord-top");
+  c.innerText = text;
+  return c;
 }
 
-/* --------------------------------------------
-   PAINEL DE NAVIOS
---------------------------------------------- */
-function resetShipPanel() {
-  shipSelection.innerHTML = `
-    <button class="shipBtn" data-size="5">🚢 Porta Avião (5)</button>
-    <button class="shipBtn" data-size="4">🚤 Encouraçado (4)</button>
-    <button class="shipBtn" data-size="3">⛵ Submarino (3)</button>
-  `;
+// ------------------------------------
+// Seleção de Navio
+// ------------------------------------
 
-  document.querySelectorAll(".shipBtn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      selectedShipSize = parseInt(btn.dataset.size);
-      selectedShipButton = btn;
-      statusElem.textContent = `Selecionado navio de tamanho ${selectedShipSize}`;
-    });
+shipButtons.forEach(btn => {
+  btn.addEventListener("click", () => {
+    const size = parseInt(btn.dataset.size);
+
+    if (shipsPlacedCount[size] >= shipsAllowed[size]) {
+      statusDisplay.innerText = "Você já usou todos os navios desse tipo!";
+      return;
+    }
+
+    placingShip = size;
+    statusDisplay.innerText = `Selecionado navio de tamanho: ${placingShip}`;
   });
-
-  orientation = "horizontal";
-  orientationInfo.textContent = "Orientação: horizontal";
-}
-
-document.getElementById("rotateBtn").addEventListener("click", () => {
-  orientation = orientation === "horizontal" ? "vertical" : "horizontal";
-  orientationInfo.textContent = `Orientação: ${orientation}`;
 });
 
-/* --------------------------------------------
-   POSICIONAR NAVIO
---------------------------------------------- */
-function placeShip(x, y) {
-  if (!isPlacingShips) return;
-  if (!selectedShipSize) return alert("Selecione um navio!");
+// ------------------------------------
+// Rotação
+// ------------------------------------
 
-  let valid = true;
-  const shipCells = [];
+rotateBtn.addEventListener("click", () => {
+  orientation = orientation === "horizontal" ? "vertical" : "horizontal";
+  orientationInfo.innerText = "Orientação: " + orientation;
+});
 
-  for (let i = 0; i < selectedShipSize; i++) {
-    const tx = orientation === "horizontal" ? x + i : x;
-    const ty = orientation === "vertical" ? y + i : y;
+// ------------------------------------
+// Preview de Navio
+// ------------------------------------
 
-    if (tx >= BOARD_SIZE || ty >= BOARD_SIZE) valid = false;
-
-    const cell = playerBoard.querySelector(`.cell[data-x="${tx}"][data-y="${ty}"]`);
-    if (!cell || cell.classList.contains("ship")) valid = false;
-
-    shipCells.push(cell);
-  }
-
-  if (!valid) return alert("Posição inválida!");
-
-  shipCells.forEach(c => c.classList.add("ship"));
-
-  playerShips.push({ x, y, size: selectedShipSize, orientation });
-
-  placedShips++;
-
-  selectedShipButton.disabled = true;
-  selectedShipButton.style.opacity = "0.4";
-  selectedShipButton = null;
-  selectedShipSize = null;
-
-  clearPreview();
-
-  if (placedShips >= TOTAL_SHIPS) {
-    isPlacingShips = false;
-    statusElem.textContent = "Aguardando adversário...";
-    socket.emit("placeShips", playerShips);
-  }
-}
-
-/* --------------------------------------------
-   PREVIEW
---------------------------------------------- */
-function previewShip(x, y) {
-  if (!isPlacingShips || !selectedShipSize) return;
+function shipPreview(x, y) {
+  if (!placingShip) return;
 
   clearPreview();
 
   let valid = true;
-  const cells = [];
+  let cells = [];
 
-  for (let i = 0; i < selectedShipSize; i++) {
-    const tx = orientation === "horizontal" ? x + i : x;
-    const ty = orientation === "vertical" ? y + i : y;
+  for (let i = 0; i < placingShip; i++) {
+    let px = orientation === "horizontal" ? x + i : x;
+    let py = orientation === "vertical" ? y + i : y;
 
-    if (tx >= BOARD_SIZE || ty >= BOARD_SIZE) valid = false;
+    if (px > 9 || py > 9) {
+      valid = false;
+      break;
+    }
 
-    const cell = playerBoard.querySelector(`.cell[data-x="${tx}"][data-y="${ty}"]`);
-    if (!cell || cell.classList.contains("ship")) valid = false;
+    const cell = getPlayerCell(px, py);
+    if (cell.classList.contains("ship")) valid = false;
 
     cells.push(cell);
   }
 
-  cells.forEach(c => {
-    if (!c) return;
-    c.classList.add(valid ? "preview-valid" : "preview-invalid");
-  });
+  previewCells = cells;
 
-  window._previewCells = cells;
+  for (const c of cells) {
+    c.classList.add(valid ? "preview-valid" : "preview-invalid");
+  }
 }
 
 function clearPreview() {
-  window._previewCells.forEach(c => {
-    if (!c) return;
-    c.classList.remove("preview-valid");
-    c.classList.remove("preview-invalid");
+  for (const c of previewCells) {
+    c.classList.remove("preview-valid", "preview-invalid");
+  }
+  previewCells = [];
+}
+
+// ------------------------------------
+// Posicionar Navio
+// ------------------------------------
+
+function placeShip(x, y) {
+  if (!placingShip) return;
+
+  if (shipsPlacedCount[placingShip] >= shipsAllowed[placingShip]) {
+    statusDisplay.innerText = "Você já utilizou todos desse tipo!";
+    return;
+  }
+
+  let valid = true;
+  let coords = [];
+
+  for (let i = 0; i < placingShip; i++) {
+    let px = orientation === "horizontal" ? x + i : x;
+    let py = orientation === "vertical" ? y + i : y;
+
+    if (px > 9 || py > 9) {
+      valid = false;
+      break;
+    }
+
+    const cell = getPlayerCell(px, py);
+    if (cell.classList.contains("ship")) valid = false;
+
+    coords.push({ x: px, y: py });
+  }
+
+  if (!valid) {
+    statusDisplay.innerText = "Posição inválida!";
+    return;
+  }
+
+  for (const c of coords) {
+    const cell = getPlayerCell(c.x, c.y);
+    cell.classList.add("ship");
+    cell.classList.add(`size-${placingShip}`);  // aplica imagem correta
+  }
+
+
+  for (const c of coords) {
+    getPlayerCell(c.x, c.y).classList.add("ship");
+  }
+
+  placedShips.push({
+    x,
+    y,
+    size: placingShip,
+    orientation,
   });
-  window._previewCells = [];
+
+  shipsPlacedCount[placingShip]++;
+
+  placingShip = null;
+  statusDisplay.innerText = "Navio posicionado!";
+  clearPreview();
+
+  if (placedShips.length === 3) {
+    socket.emit("placeShips", placedShips);
+    statusDisplay.innerText = "Aguardando adversário...";
+  }
 }
 
-/* --------------------------------------------
-   ATAQUE
---------------------------------------------- */
-function attackEnemy(x, y, cell) {
-  if (isPlacingShips) return alert("Posicione seus navios primeiro!");
-  if (!isMyTurn) return alert("Aguarde seu turno!");
-  if (cell.classList.contains("hit") || cell.classList.contains("miss")) return;
+// ------------------------------------
+// Auxiliares
+// ------------------------------------
 
+function getPlayerCell(x, y) {
+  return playerBoard.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+}
+
+function getEnemyCell(x, y) {
+  return enemyBoard.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
+}
+
+// ------------------------------------
+// Atacar
+// ------------------------------------
+
+function onAttack(x, y) {
+  if (!myTurn || popupActive) return;
+
+  const key = `${x},${y}`;
+
+  if (attackedCells.has(key)) {
+    statusDisplay.innerText = "Você já atacou essa posição!";
+    return;
+  }
+
+  attackedCells.add(key);
   socket.emit("attack", { x, y });
-  isMyTurn = false;
-
-  statusElem.textContent = `Você atacou [${x}, ${y}]`;
 }
 
-/* --------------------------------------------
-   SOCKET EVENTOS
---------------------------------------------- */
-socket.on("connect", () => {
-  playerIdElem.textContent = socket.id;
-  statusElem.textContent = "Conectado! Aguardando sala...";
-});
+// ------------------------------------
+// SOCKETS
+// ------------------------------------
 
-socket.on("joinedRoom", (roomId) => {
-  roomIdElem.textContent = roomId;
-  statusElem.textContent = "Aguardando adversário...";
+socket.on("joinedRoom", (room) => {
+  myRoom = room;
+  myId = socket.id;
+
+  document.getElementById("playerId").innerText = myId;
+  document.getElementById("roomId").innerText = myRoom;
+
+  statusDisplay.innerText = "Aguardando jogador...";
 });
 
 socket.on("startGame", () => {
-  statusElem.textContent = "Posicione seus navios.";
+  statusDisplay.innerText = "Adversário conectado! Posicione seus navios.";
 });
 
 socket.on("readyToPlay", () => {
-  statusElem.textContent = "Jogo iniciado!";
+  statusDisplay.innerText = "Partida iniciada!";
 });
 
 socket.on("turnUpdate", ({ turn }) => {
-  isMyTurn = turn === socket.id;
-  statusElem.textContent = isMyTurn ? "Seu turno!" : "Turno do adversário...";
+  myTurn = turn === myId;
+
+  if (myTurn) {
+    statusDisplay.innerText = "Seu turno!";
+    enemyWrapper.classList.remove("enemy-disabled");
+    enemyWrapper.classList.add("enemy-enabled");
+  } else {
+    statusDisplay.innerText = "Turno do inimigo...";
+    enemyWrapper.classList.add("enemy-disabled");
+    enemyWrapper.classList.remove("enemy-enabled");
+  }
 });
 
 socket.on("attackResult", ({ attacker, x, y, result }) => {
-  const isMyAttack = attacker === socket.id;
-  const board = isMyAttack ? enemyBoard : playerBoard;
+  const cell =
+    attacker === myId ? getEnemyCell(x, y) : getPlayerCell(x, y);
 
-  const cell = board.querySelector(`.cell[data-x="${x}"][data-y="${y}"]`);
-  if (!cell) return;
-
-  cell.textContent = result === "hit" ? "❌" : "●";
-  cell.classList.add(result === "hit" ? "hit" : "miss");
+  if (result === "hit") {
+    cell.classList.add("hit");
+    cell.innerText = "❌";
+  } else {
+    cell.classList.add("miss");
+    cell.innerText = "●";
+  }
 });
 
-/* --------------------------------------------
-   FIM DE JOGO
---------------------------------------------- */
-socket.on("gameOverOptions", (data) => {
-  statusElem.textContent = (data.winner === socket.id)
-    ? "🎉 Você venceu!"
-    : "💥 Você perdeu!";
+socket.on("gameOverOptions", ({ winner }) => {
+  if (winner === myId) {
+    statusDisplay.innerText = "🎉 Você venceu!";
+  } else {
+    statusDisplay.innerText = "❌ Você perdeu!";
+  }
 
-  postGame.style.display = "block";
+  postGameMenu.style.display = "block";
 });
 
-/* --------------------------------------------
-   REINICIAR
---------------------------------------------- */
+// ------------------------------------
+// REVANCHE
+// ------------------------------------
+
 btnRematch.addEventListener("click", () => {
   socket.emit("rematchRequest");
-  statusElem.textContent = "Solicitando revanche...";
+  statusDisplay.innerText = "Revanche solicitada...";
 });
+
+// Adversário pediu revanche → mostrar popup
+socket.on("opponentRematchRequest", () => {
+  rematchPopup.classList.remove("hidden");
+  popupActive = true;
+});
+
+// Aceitar revanche
+popupAccept.addEventListener("click", () => {
+  rematchPopup.classList.add("hidden");
+  popupActive = false;
+  socket.emit("rematchRequest");
+});
+
+// Recusar revanhce
+popupDecline.addEventListener("click", () => {
+  rematchPopup.classList.add("hidden");
+  popupActive = false;
+  statusDisplay.innerText = "Você recusou a revanche.";
+});
+
+// Ambos aceitaram
+socket.on("rematchStart", () => {
+  resetBoards();
+  placedShips = [];
+  shipsPlacedCount = { 5: 0, 4: 0, 3: 0 };
+  attackedCells.clear();
+
+  postGameMenu.style.display = "none";
+  rematchPopup.classList.add("hidden");
+
+  statusDisplay.innerText =
+    "Revanche iniciada! Posicione seus navios.";
+});
+
+// ------------------------------------
+// NOVA PARTIDA
+// ------------------------------------
 
 btnNewMatch.addEventListener("click", () => {
   socket.emit("newMatchRequest");
-  statusElem.textContent = "Nova partida solicitada...";
 });
 
-socket.on("forceReset", resetBoards);
-socket.on("rematchStart", resetBoards);
+// servidor manda reset completo
+socket.on("forceReset", () => {
+  resetBoards();
+  placedShips = [];
+  shipsPlacedCount = { 5: 0, 4: 0, 3: 0 };
+  attackedCells.clear();
+
+  postGameMenu.style.display = "none";
+  statusDisplay.innerText = "Nova partida criada! Aguardando jogador...";
+});
+
+// ------------------------------------
+// Utils
+// ------------------------------------
+
+function resetBoards() {
+  createBoard(playerBoard, "player");
+  createBoard(enemyBoard, "enemy");
+}
 
 socket.on("playerLeft", () => {
-  statusElem.textContent = "O adversário saiu.";
-  createBoard(enemyBoard, false);
+  statusDisplay.innerText = "O adversário saiu.";
 });
-
-/* --------------------------------------------
-   INICIALIZAÇÃO
---------------------------------------------- */
-resetBoards();

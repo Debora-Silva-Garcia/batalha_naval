@@ -1,223 +1,260 @@
 const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-
 const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
+const http = require("http").createServer(app);
+const io = require("socket.io")(http);
 
-app.use(express.static("public"));
+app.use(express.static(__dirname + "/public"));
 
-const PORT = process.env.PORT || 3000;
-const rooms = {};
+// -----------------------------
+// Estruturas de dados
+// -----------------------------
 
-/* --------------------------------------------------------
-   FUNÇÕES AUXILIARES
--------------------------------------------------------- */
-function getRoomByPlayer(playerId) {
-  for (const roomId in rooms) {
-    if (rooms[roomId].players.includes(playerId)) return roomId;
+let rooms = {};           // { roomId: [socket1, socket2] }
+let players = {};         // players[socketId] = { roomId, ships, hits, attacked, ready, wantsRematch }
+
+// -----------------------------
+// Funções auxiliares
+// -----------------------------
+
+function getOpponent(roomId, socketId) {
+  const playersInRoom = rooms[roomId];
+  if (!playersInRoom) return null;
+  return playersInRoom.find(id => id !== socketId);
+}
+
+function cellBelongsToShip(ships, x, y) {
+  for (const ship of ships) {
+    for (let i = 0; i < ship.size; i++) {
+      const tx = ship.orientation === "horizontal" ? ship.x + i : ship.x;
+      const ty = ship.orientation === "vertical" ? ship.y + i : ship.y;
+
+      if (tx === x && ty === y) return true;
+    }
   }
-  return null;
+  return false;
 }
 
-function makeRoomId() {
-  return "room-" + Math.random().toString(36).substring(2, 9);
+function allShipsSunk(player) {
+  const totalParts = player.ships.reduce((sum, s) => sum + s.size, 0);
+  return player.hits.size >= totalParts;
 }
 
-function assignToAvailableRoom(socket) {
-  let roomJoined = null;
+function validateShips(ships) {
+  const allowed = { 5: 1, 4: 1, 3: 1 };
+  const used = { 5: 0, 4: 0, 3: 0 };
 
-  for (const roomId in rooms) {
-    const room = rooms[roomId];
-    if (room.players.length === 1 && !room.gameStarted) {
-      room.players.push(socket.id);
-      roomJoined = roomId;
-      break;
+  const occupied = new Set();
+
+  for (const ship of ships) {
+    if (!allowed[ship.size]) return false;
+
+    used[ship.size]++;
+    if (used[ship.size] > allowed[ship.size]) return false;
+
+    for (let i = 0; i < ship.size; i++) {
+      let x = ship.orientation === "horizontal" ? ship.x + i : ship.x;
+      let y = ship.orientation === "vertical" ? ship.y + i : ship.y;
+
+      // Fora do tabuleiro
+      if (x < 0 || x > 9 || y < 0 || y > 9) return false;
+
+      const key = `${x},${y}`;
+      if (occupied.has(key)) return false;
+
+      occupied.add(key);
     }
   }
 
-  if (!roomJoined) {
-    let newRoom;
-    do {
-      newRoom = makeRoomId();
-    } while (rooms[newRoom]);
-
-    rooms[newRoom] = {
-      players: [socket.id],
-      ships: {},
-      hitsAgainst: {},
-      turn: null,
-      lock: false,
-      gameStarted: false
-    };
-
-    roomJoined = newRoom;
-  }
-
-  socket.join(roomJoined);
-  socket.emit("joinedRoom", roomJoined);
-
-  const room = rooms[roomJoined];
-
-  if (room.players.length === 2) {
-    room.turn = room.players[0];
-    io.to(roomJoined).emit("startGame");
-    io.to(roomJoined).emit("turnUpdate", { turn: room.turn });
-  }
+  return true;
 }
 
-/* --------------------------------------------------------
-   SOCKET CONNECTION
--------------------------------------------------------- */
+// -----------------------------
+// Pareamento automático
+// -----------------------------
+
+function autoJoin(socket) {
+  for (const roomId in rooms) {
+    if (rooms[roomId].length === 1) {
+      rooms[roomId].push(socket.id);
+
+      players[socket.id] = {
+        roomId,
+        ships: [],
+        hits: new Set(),
+        attacked: new Set(),
+        ready: false,
+        wantsRematch: false,
+      };
+
+      socket.join(roomId);
+      socket.emit("joinedRoom", roomId);
+      io.to(roomId).emit("startGame");
+      return;
+    }
+  }
+
+  const newRoom = "room-" + socket.id;
+  rooms[newRoom] = [socket.id];
+
+  players[socket.id] = {
+    roomId: newRoom,
+    ships: [],
+    hits: new Set(),
+    attacked: new Set(),
+    ready: false,
+    wantsRematch: false,
+  };
+
+  socket.join(newRoom);
+  socket.emit("joinedRoom", newRoom);
+}
+
+// -----------------------------
+// SOCKET IO
+// -----------------------------
+
 io.on("connection", (socket) => {
+  console.log("Cliente conectado:", socket.id);
 
-  assignToAvailableRoom(socket);
+  autoJoin(socket);
 
-  /* --------------------------------------------------------
-     RECEBENDO NAVIOS
-  -------------------------------------------------------- */
+  // -----------------------------
+  // Recebe navios
+  // -----------------------------
   socket.on("placeShips", (ships) => {
-    const roomId = getRoomByPlayer(socket.id);
-    const room = rooms[roomId];
-    room.ships[socket.id] = ships;
+    const p = players[socket.id];
 
-    if (Object.keys(room.ships).length === 2) {
-      room.gameStarted = true;
+    if (!validateShips(ships)) {
+      socket.emit("invalidShips");
+      return;
+    }
+
+    p.ships = ships;
+    p.ready = true;
+
+    const roomId = p.roomId;
+    const [p1, p2] = rooms[roomId];
+
+    if (p1 && p2 && players[p1].ready && players[p2].ready) {
       io.to(roomId).emit("readyToPlay");
-      io.to(roomId).emit("turnUpdate", { turn: room.turn });
+      io.to(roomId).emit("turnUpdate", { turn: p1 });
     }
   });
 
-  /* --------------------------------------------------------
-     ATAQUE
-  -------------------------------------------------------- */
-  /* --------------------------------------------------------
-   ATAQUE + DETECÇÃO DE VITÓRIA
--------------------------------------------------------- */
+  // -----------------------------
+  // Ataque
+  // -----------------------------
   socket.on("attack", ({ x, y }) => {
-    const roomId = getRoomByPlayer(socket.id);
-    const room = rooms[roomId];
+    const p = players[socket.id];
+    const roomId = p.roomId;
+    const enemyId = getOpponent(roomId, socket.id);
+    const enemy = players[enemyId];
 
-    if (!room.gameStarted) {
-      socket.emit("message", "Partida não iniciada.");
+    const key = `${x},${y}`;
+
+    // Já atacou esse ponto?
+    if (p.attacked.has(key)) {
+      socket.emit("attackRejected", { reason: "duplicate" });
       return;
     }
 
-    if (socket.id !== room.turn) {
-      socket.emit("message", "⛔ Não é seu turno!");
-      return;
-    }
+    p.attacked.add(key);
 
-    const opponentId = room.players.find(id => id !== socket.id);
+    const hit = cellBelongsToShip(enemy.ships, x, y);
 
-    if (!room.hitsAgainst[opponentId]) {
-      room.hitsAgainst[opponentId] = new Set();
-    }
+    if (hit) enemy.hits.add(key);
 
-    let hit = false;
-
-    for (const ship of room.ships[opponentId]) {
-      for (let i = 0; i < ship.size; i++) {
-        const sx = ship.x + (ship.orientation === "horizontal" ? i : 0);
-        const sy = ship.y + (ship.orientation === "vertical" ? i : 0);
-
-        if (sx === x && sy === y) {
-          hit = true;
-          room.hitsAgainst[opponentId].add(`${sx},${sy}`);
-        }
-      }
-    }
-
-    // Envia resultado
     io.to(roomId).emit("attackResult", {
       attacker: socket.id,
-      x, y,
-      result: hit ? "hit" : "miss"
+      x,
+      y,
+      result: hit ? "hit" : "miss",
     });
 
-    // Alternar turno
-    room.turn = opponentId;
-    io.to(roomId).emit("turnUpdate", { turn: room.turn });
-
-    // =============================
-    //      DETECÇÃO DE VITÓRIA
-    // =============================
-    const totalShipCells =
-      room.ships[opponentId].reduce((sum, s) => sum + s.size, 0);
-
-    const currentHits = room.hitsAgainst[opponentId].size;
-
-    if (currentHits >= totalShipCells) {
-      io.to(roomId).emit("gameOverOptions", {
-        winner: socket.id
-      });
-
-      room.gameStarted = false;
+    // Verifica vitória
+    if (allShipsSunk(enemy)) {
+      io.to(roomId).emit("gameOverOptions", { winner: socket.id });
+      return;
     }
+
+    // Turno alternado
+    io.to(roomId).emit("turnUpdate", { turn: enemyId });
   });
 
-  /* --------------------------------------------------------
-     REVANCHE
-  -------------------------------------------------------- */
+  // -----------------------------
+  // Revanche
+  // -----------------------------
   socket.on("rematchRequest", () => {
-    const roomId = getRoomByPlayer(socket.id);
-    const room = rooms[roomId];
+    const p = players[socket.id];
+    const roomId = p.roomId;
 
-    if (!room.rematchVotes) room.rematchVotes = new Set();
-    room.rematchVotes.add(socket.id);
+    p.wantsRematch = true;
 
-    if (room.rematchVotes.size === 2) {
-      room.ships = {};
-      room.hitsAgainst = {};
-      room.turn = room.players[0];
-      room.gameStarted = false;
+    // Notifica adversário
+    socket.to(roomId).emit("opponentRematchRequest");
 
-      delete room.rematchVotes;
+    const [p1, p2] = rooms[roomId];
+
+    if (
+      p1 && p2 &&
+      players[p1].wantsRematch &&
+      players[p2].wantsRematch
+    ) {
+      // Reset
+      for (const pid of rooms[roomId]) {
+        players[pid].ships = [];
+        players[pid].hits = new Set();
+        players[pid].attacked = new Set();
+        players[pid].ready = false;
+        players[pid].wantsRematch = false;
+      }
 
       io.to(roomId).emit("rematchStart");
     }
   });
 
-  /* --------------------------------------------------------
-     NOVA PARTIDA
-  -------------------------------------------------------- */
+  // -----------------------------
+  // Nova partida (reset total)
+  // -----------------------------
   socket.on("newMatchRequest", () => {
-    const roomId = getRoomByPlayer(socket.id);
+    const roomId = players[socket.id].roomId;
 
-    if (roomId) {
-      const room = rooms[roomId];
+    io.to(roomId).emit("forceReset");
 
-      socket.leave(roomId);
-
-      room.players
-        .filter(id => id !== socket.id)
-        .forEach(id => io.to(id).emit("playerLeft", socket.id));
-
-      delete rooms[roomId];
+    const roomPlayers = rooms[roomId];
+    for (const pid of roomPlayers) {
+      players[pid].ships = [];
+      players[pid].hits = new Set();
+      players[pid].attacked = new Set();
+      players[pid].ready = false;
+      players[pid].wantsRematch = false;
     }
-
-    socket.emit("forceReset");
-    assignToAvailableRoom(socket);
-  });
-
-  /* --------------------------------------------------------
-     DESCONECTOU
-  -------------------------------------------------------- */
-  socket.on("disconnect", () => {
-    const roomId = getRoomByPlayer(socket.id);
-    if (!roomId) return;
-
-    const room = rooms[roomId];
-
-    room.players
-      .filter(id => id !== socket.id)
-      .forEach(id => io.to(id).emit("playerLeft", socket.id));
 
     delete rooms[roomId];
   });
+
+  // -----------------------------
+  // Desconexão
+  // -----------------------------
+  socket.on("disconnect", () => {
+    const p = players[socket.id];
+    if (!p) return;
+
+    const roomId = p.roomId;
+
+    console.log("Cliente saiu:", socket.id);
+    io.to(roomId).emit("playerLeft", socket.id);
+
+    rooms[roomId] = rooms[roomId].filter(id => id !== socket.id);
+    delete players[socket.id];
+
+    if (rooms[roomId].length === 0) delete rooms[roomId];
+  });
 });
 
-server.listen(PORT, () => {
-  console.log(`Servidor rodando em http://localhost:${PORT}`);
+// -----------------------------
+// Inicia servidor
+// -----------------------------
+http.listen(8080, () => {
+  console.log("Servidor rodando em http://localhost:8080");
 });
